@@ -1,0 +1,669 @@
+------------------------------------------------------------------------
+
+---
+title: "Challenged_Internal_Fragments"
+author: "Arthur Grimaud"
+format: html
+editor: visual
+---
+
+## Challenges in internal fragment annotation
+
+This script gather visualizations that aim to show challenges and difficulties that arise when considering internal fragment ions in spectra.
+
+## Setup
+
+Libraries and environment setup
+
+```{r, results='hide'}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(MSnbase)
+library(wrTopDownFrag)
+library(Peptides)
+library(OrgMassSpecR)
+library(RColorBrewer)
+library(reshape2)
+library(ggpattern)
+library(ggplot2)
+library(ggpubr)
+#library(raster)
+## Setup environment
+#setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+setwd("/home/agrimaud/Desktop/Thesis/Projects/Internal_fragments/00-Chalenges_Internal_Ions")
+```
+
+## Constants
+
+```{r, results='hide'}
+
+ion_caps_terminal <- list(
+    #Nterm
+    "a" = MolecularWeight(formula = list(C=0, O=0, H=0, N=0)) - MolecularWeight(formula = list(C=1, O=2, H=2, N=0)),
+    "b" = MolecularWeight(formula = list(C=0, O=0, H=0, N=0)) - MolecularWeight(formula = list(C=0, O=1, H=2, N=0)),
+    "c1" = MolecularWeight(formula = list(C=0, O=1, H=2, N=1)) - MolecularWeight(formula = list(C=0, O=1, H=2, N=0)),
+    "c" = MolecularWeight(formula = list(C=0, O=1, H=3, N=1)) - MolecularWeight(formula = list(C=0, O=1, H=2, N=0)),
+    "cdot" = MolecularWeight(formula = list(C=0, O=1, H=2, N=3)) - MolecularWeight(formula = list(C=0, O=1, H=2, N=0)),
+    "c1" = MolecularWeight(formula = list(C=0, O=0, H=5, N=1)) - MolecularWeight(formula = list(C=0, O=1, H=2, N=0)),
+    #Cterm
+    "x" = MolecularWeight(formula = list(C=1, O=2, H=2, N=0)) - MolecularWeight(formula = list(C=0, O=1, H=2, N=0)),
+    "y" = MolecularWeight(formula = list(C=0, O=0, H=0, N=0)) - MolecularWeight(formula = list(C=0, O=0, H=0, N=0)),
+    "zdot" = MolecularWeight(formula = list(C=0, O=1, H=2, N=1)) - MolecularWeight(formula = list(C=0, O=1, H=2, N=0)),
+    "z1" = MolecularWeight(formula = list(C=0, O=1, H=1, N=1)) - MolecularWeight(formula = list(C=0, O=0, H=1, N=1)),
+    "z2" = MolecularWeight(formula = list(C=0, O=1, H=2, N=1)) - MolecularWeight(formula = list(C=0, O=0, H=1, N=1))
+)
+
+ion_caps_internal <- list(
+    "a-x" = ion_caps_terminal$a + ion_caps_terminal$x,
+    "a-y" = ion_caps_terminal$a + ion_caps_terminal$y,
+    "a-zdot" = ion_caps_terminal$a + ion_caps_terminal$zdot,
+    "a-z+1" = ion_caps_terminal$a + ion_caps_terminal$z1,
+    "a-z+2" = ion_caps_terminal$a + ion_caps_terminal$z2,
+    "b-x" = ion_caps_terminal$b + ion_caps_terminal$x,
+    "b-y" = ion_caps_terminal$b + ion_caps_terminal$y,
+    "b-zdot" = ion_caps_terminal$b + ion_caps_terminal$zdot,
+    "b-z1" = ion_caps_terminal$b+ ion_caps_terminal$z1,
+    "b-z2" = ion_caps_terminal$b+ ion_caps_terminal$z2,
+    "c-x" = ion_caps_terminal$c + ion_caps_terminal$x,
+    "c-y" = ion_caps_terminal$c + ion_caps_terminal$y,
+    "c-zdot" = ion_caps_terminal$c + ion_caps_terminal$zdot,
+    "c-z1" = ion_caps_terminal$c + ion_caps_terminal$z1,
+    "c-z2" = ion_caps_terminal$c + ion_caps_terminal$z2,
+    "c1-x" = ion_caps_terminal$c1 + ion_caps_terminal$x,
+    "c1-y" = ion_caps_terminal$c1 + ion_caps_terminal$y,
+    "czdot" = ion_caps_terminal$c + ion_caps_terminal$zdot,
+    "cz1" = ion_caps_terminal$c + ion_caps_terminal$z1,
+    "cz2" = ion_caps_terminal$c + ion_caps_terminal$z2,
+    "cdot-zdot" = ion_caps_terminal$cdot + ion_caps_terminal$zdot,
+    "cdot-z1" = ion_caps_terminal$cdot + ion_caps_terminal$z1,
+    "cdot-z2" = ion_caps_terminal$cdot + ion_caps_terminal$z2,
+    "c1-zdot" = ion_caps_terminal$c+1 + ion_caps_terminal$zdot,
+    "c1-z1" = ion_caps_terminal$c1 + ion_caps_terminal$z1,
+    "c1-z2" = ion_caps_terminal$c1 + ion_caps_terminal$z2
+)
+
+#merge the two lists
+
+ion_caps_l <- c(ion_caps_terminal, ion_caps_internal)
+
+
+internal <- c(rep(FALSE, length(ion_caps_terminal)), rep(TRUE, length(ion_caps_internal)))
+
+ion_caps = data.frame(type = names(ion_caps_l), delta_mass = unlist(ion_caps_l), internal = internal)
+#type of fragmentation
+
+cid = c("b","y","a")
+etd_term = c("zdot","z1","z2","c")
+etd_all = c("zdot","z1","z2","c","c-zdot" ,"c-z1","cdot-zdot")
+
+
+
+ETD = c("zdot","z1","z2","c","c-zdot" ,"c-z1","cdot-zdot")
+CID = c("b","y","b-y") 
+ETHCD= c("b","y","b-y","zdot","z1","z2","c","c-zdot" ,"c-z1","cdot-zdot", "b-zdot","b-z1","b-z2", "c-y")
+UVPD = c("a","b","c","x","y","zdot", "a-x", "a-y", "a-zdot","b-x","b-y","b-zdot","c-x","c-y","c-zdot")
+
+
+fragment_types_list <- list(ETD = ETD, CID = CID, ETHCD = ETHCD, UVPD = UVPD)
+```
+
+## Load Data
+
+```{r}
+#Peptide list from HeLa runs
+load("data/BU_pept_HeLa.rds")
+load("data/TD_pept_Human.rds")
+
+#Load functions
+source("Challenges_Internal_Fragments_Functions.R")
+
+```
+
+## MAIN
+
+#### Generate peptides sequence table
+
+```{r}
+
+all_pept_table_bu = as.data.frame(cbind(sequence=HeLa_BU_pept)) %>% mutate(length=nchar(sequence))
+
+all_pept_table_td = as.data.frame(cbind(sequence=Human_TD_pept$seq)) %>% mutate(length=nchar(sequence)) %>% filter(length > 30 & length <= 200 & length%%10 == 0 ) 
+
+
+all_pept_table = rbind(all_pept_table_bu,all_pept_table_td)
+
+print(unique(all_pept_table$length))
+
+```
+
+Calculate Overlaps and coverage of mass range
+
+```{r, results='hide'}
+
+
+error_tolerance = 5 #Error tolerance in PPM
+
+peptide_length = c()
+coverage_values = c()
+overlaps_tables = data.frame(matrix(ncol = 5, nrow = 1))
+colnames(overlaps_tables) = c( "overlap_no", "Freq","peptide_length", "peptide", "coverage")
+
+
+
+for(l in as.numeric(unique(all_pept_table$length))){
+  print(l)
+  pep_seq_by_len = all_pept_table[all_pept_table$length == l, "sequence"]
+  
+  for(s in c(1:length(pep_seq_by_len))[c(1:100)] ){
+  #for(s in c(1:10) ){  
+    seq = pep_seq_by_len[s]
+    masses = frag_masses(seq, etd_all, min_size = 2)
+    over_tab = calculate_overlapping(masses, error_tolerance)
+    
+    peptide_length = c(peptide_length,l)
+    over_tab$peptide_length = l
+    over_tab$peptide = seq
+    over_tab$coverage =  coverage(error_intervals(masses, error_ppm=5), c(100,mw(seq)))
+    overlaps_tables = rbind(overlaps_tables, over_tab)
+  
+    
+  }
+}  
+
+save(overlaps_tables, file="table_1.rds")
+save(coverage_values, file="list_1.rds")
+
+
+load(file="table_1.rds")
+load(file="list_1.rds")
+
+```
+
+#### Plot overlap and mass range coverage in function of peptide length
+
+```{r}
+
+
+overlaps_tables_sum <- overlaps_tables %>%
+  filter(!is.null(peptide_length)) %>%
+  mutate(overlap_no = as.numeric(overlap_no)) %>%
+  mutate(overlap_no = replace(overlap_no, overlap_no >= 5, 5))  %>%
+  group_by(overlap_no, peptide_length) %>%
+  summarise_at(vars(-peptide), funs(sum(., na.rm=TRUE))) %>%
+  ungroup() %>%
+  group_by(peptide_length) %>%
+  mutate(Ratio = Freq/ sum(Freq)) %>%
+  filter(overlap_no != 1) 
+
+
+num_colors <- length(unique(overlaps_tables_sum$overlap_no))
+custom_colors <- c(brewer.pal(num_colors, "OrRd")[2:4],"purple" ) 
+
+
+overlap_pept_len = ggplot(overlaps_tables_sum, aes(x = factor(peptide_length), y = Ratio, fill = factor(overlap_no))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Peptide length (aa)", y = "Ratio", fill = "Overlapping fragments", title = "Fragment overlap in function of fragment length") +
+  ylim(0, 1)+ 
+  scale_fill_manual(labels=c( "2","3","4","5+"),values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Tilt x-axis ticks by 45 degrees
+  theme_bw()+ 
+  theme(legend.position = "none",panel.grid.major.x = element_blank(),panel.grid.minor.x = element_blank())
+
+overlap_pept_len
+
+ggsave(overlap_pept_len, file="overlap_pept_len_fig.svg", height = 6,width = 4)
+
+```
+
+#### Mz range coverage in function of peptide length
+
+```{r}
+
+
+coverage_table = overlaps_tables_sum %>%
+  group_by(peptide_length) %>%
+  summarize(coverage = mean(coverage))
+
+
+coverage_pept_len_fig = ggplot(coverage_table, aes(x = factor(peptide_length), y = coverage)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Peptide length (aa)", y = "m/z range covered (%)", title = "m/z coverage in function of fragment length") +
+  ylim(0, 100)+ 
+  theme(panel.grid.major.x = element_blank())+  # Remove vertical grid lines
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Tilt x-axis ticks by 45 degrees
+  theme_bw()+ 
+  theme(legend.position = "none",panel.grid.major.x = element_blank(),panel.grid.minor.x = element_blank())
+
+coverage_pept_len_fig
+
+
+ggsave(coverage_pept_len_fig, file="coverage_pept_len_fig.svg", height = 6,width = 4)
+
+
+
+```
+
+#### Overlap fragment with min mass threshold
+
+More overlapping fragments should be expected in the lower m/z range, as it theoretically exists more small fragments and it is therefore more likely to find several with a similar mass. To assess whether a m/z threshold could be applied to exclude false positive internal fragment ions annotation we looked here at the overlap percentage in fragment ions when a minimal m/z threshold is set.
+
+```{r}
+error_tolerance = 5 
+
+seqs = all_pept_table[all_pept_table$length==20,]$sequence
+
+overlaps_tables_thres = data.frame(matrix(ncol = 5, nrow = 1))
+colnames(overlaps_tables_thres) = c( "overlap_no", "Freq","min_mz","peptide","percent_frag")
+
+
+for(seq in seqs[c(1:100)]){
+  masses = frag_masses(seq, etd_all, min_size = 2)
+  for(min_mz in seq(0,4000,by=200)){
+    masses_threshold = masses[masses>min_mz]
+    over_tab = calculate_overlapping(masses_threshold, error_tolerance)
+    over_tab$min_mz = min_mz
+    over_tab$peptide = seq
+    over_tab$percent_frag = length(masses_threshold)/length(masses)
+    overlaps_tables_thres = rbind(overlaps_tables_thres, over_tab)
+    
+  }
+  print(seq)
+}
+
+
+save(overlaps_tables_thres, file="table_2.rds")
+load(file="table_2.rds")
+```
+
+```{r}
+
+overlaps_tables_thres_sum <- overlaps_tables_thres %>%
+  filter(!is.null(peptide)) %>%
+  mutate(overlap_no = as.numeric(overlap_no)) %>% 
+  mutate(overlap_no = replace(overlap_no, overlap_no >= 5, 5))  %>%
+  group_by(overlap_no, min_mz) %>%
+  summarise_at(vars(-peptide), ~sum(., na.rm=TRUE)) %>%
+  ungroup()%>%
+  group_by(min_mz) %>%
+  mutate(Ratio = Freq/ sum(Freq))%>%
+  filter(overlap_no > 1)
+  
+  
+
+
+num_colors <- length(unique(overlaps_tables_thres_sum$overlap_no))
+custom_colors <- c(brewer.pal(num_colors, "OrRd")[2:5],"purple" ) 
+
+
+
+g = ggplot(overlaps_tables_thres_sum, aes(x = factor(min_mz), y = Ratio, fill = factor(overlap_no))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Min m/z", y = "Ratio", fill = "overlaping fragments") +
+  ylim(0, 0.5)+ 
+  scale_fill_manual(labels=c('2', "3","4","5+"),values = custom_colors) + theme_linedraw() +theme(legend.position = c(0.15, 0.75)) 
+g
+
+
+overlaps_tables_thres_sum_f <- overlaps_tables_thres %>%
+  group_by(min_mz) %>%
+  summarise_at(vars(-c("Freq", "overlap_no")), ~mean(., na.rm=TRUE)) %>%
+  filter(percent_frag> 0.01)
+
+g1 = ggplot(overlaps_tables_thres_sum_f, aes(x = factor(min_mz), y = percent_frag)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Min m/z", y = "Ratio of fragment from total") +
+  ylim(0, 1)+ 
+  scale_fill_manual(labels=c('2', "3","4","5+"),values = custom_colors) + theme_linedraw() + theme(legend.position = c(0.15, 0.75)) 
+g1
+```
+
+#### Optimal m/z threshold to minimize overlap
+
+```{r, results='hide'}
+
+error_tolerance = 5 
+
+overlaps_tables_thres_all_length = data.frame(matrix(ncol = 5, nrow = 1))
+colnames(overlaps_tables_thres_all_length) = c( "overlap_no", "Freq","min_mz","peptide","percent_frag")
+
+lengths = as.numeric(unique(all_pept_table$length))
+
+for(l in  lengths[lengths<=29]){
+  print(l)
+  sequences = all_pept_table[all_pept_table$length == l, "sequence"]
+  for(seq in sequences[c(1:50)]){
+    masses = frag_masses(seq, etd_all, min_size = 2)
+    for(min_mz in seq(1,0.05,by=-0.05)){
+      masses_threshold = as.data.frame(masses) %>% top_frac(min_mz, )
+      masses_threshold = masses_threshold$masses
+      over_tab = calculate_overlapping(masses_threshold, error_tolerance)
+      over_tab$min_mz = min_mz
+      over_tab$peptide = seq
+      over_tab$percent_frag = length(masses_threshold)/length(masses)
+      overlaps_tables_thres_all_length = rbind(overlaps_tables_thres_all_length, over_tab)
+    }
+    print(seq)
+  }
+}
+
+save(overlaps_tables_thres_all_length, file="table3.rds")
+load( file="table3.rds")
+```
+
+```{r}
+overlaps_tables_thres_all_length_f = overlaps_tables_thres_all_length %>%
+  mutate(pep_len = nchar(peptide))%>%
+  mutate(overlap_no = as.numeric(overlap_no)-1) %>%
+  filter(overlap_no != -1) %>%
+  filter(!is.null(peptide)) %>%
+  mutate(overlap_no = replace(overlap_no, overlap_no > 0, 1))  %>%
+  group_by(overlap_no, min_mz, pep_len) %>%
+  summarise_at(vars(-peptide), ~sum(., na.rm=TRUE)) %>%
+  ungroup()%>%
+  group_by(min_mz, pep_len) %>%
+  mutate(Ratio = Freq/ sum(Freq)) %>%
+  filter(overlap_no != 0)
+  
+  
+
+
+  
+  
+
+pep_lengths = unique(overlaps_tables_thres_all_length_f$pep_len)
+thresholds = unique(overlaps_tables_thres_all_length_f$min_mz)
+opti_thresh_mat = matrix(ncol = length(pep_lengths), nrow=length(thresholds) )
+colnames(opti_thresh_mat) = pep_lengths
+rownames(opti_thresh_mat) = thresholds
+
+for(l in c(1:length(pep_lengths))){
+  for(t in c(1:length(thresholds))){
+    
+r = as.numeric(overlaps_tables_thres_all_length_f[overlaps_tables_thres_all_length_f$min_mz == thresholds[t] & overlaps_tables_thres_all_length_f$pep_len == pep_lengths[l],]$Ratio)
+
+    if(length(r) == 0 ){
+      r = 0
+    }
+    opti_thresh_mat[t,l] = r
+  }
+}
+
+
+#using raster
+matrix_data = data.frame(melt(opti_thresh_mat))
+
+colnames(matrix_data) = c("min_mz","pep_len","value")
+
+threshold <- 0.10
+line_data10 <- matrix_data %>%
+  group_by(pep_len) %>%
+  filter(value < threshold) %>%
+  top_n(1, min_mz) 
+  
+threshold <- 0.05
+line_data5 <- matrix_data %>%
+  group_by(pep_len) %>%
+  filter(value < threshold) %>%
+  top_n(1, min_mz) 
+
+# Create the base plot
+matrix_plot <- ggplot(matrix_data, aes(x = pep_len, y =min_mz, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(x="Peptide Length", y="Minimum m/z", title="Matrix") 
+
+# Add the line
+matrix_plot_with_line <- matrix_plot +
+  geom_line(data = line_data10, aes(x = pep_len, y = min_mz), color = "green") 
+# Display the plot
+print(matrix_plot_with_line)
+
+
+#plot threshold selected percent remaining frag
+
+df_remaining_frag = overlaps_tables_thres_all_length %>%
+  mutate(pep_len = nchar(peptide))%>%
+  mutate(overlap_no = as.numeric(overlap_no)-1) %>%
+  filter(overlap_no != -1) %>%
+  filter(!is.null(peptide)) %>%
+  mutate(overlap_no = replace(overlap_no, overlap_no > 0, 1))  %>%
+  group_by(overlap_no, min_mz, pep_len) %>%
+  summarise_at(vars(-peptide), ~mean(., na.rm=TRUE))%>%
+  filter(overlap_no != 0)
+
+  #filter by selected theshold
+  
+# Create pairs of values in df1 and df2
+df1_pairs <- paste(df_remaining_frag$min_mz, df_remaining_frag$pep_len, sep = "_")
+df2_pairs <- paste(line_data$min_mz, line_data$pep_len, sep = "_")
+
+# Filter df1 based on pairs found in df2
+df_remaining_frag <- df_remaining_frag[df1_pairs %in% df2_pairs, ]
+
+
+```
+
+#### Influence of considered charge states
+
+```{r}
+error_tolerance = 5 
+
+seqs = all_pept_table[all_pept_table$length==20,]$sequence
+
+overlap_charges = data.frame(matrix(ncol = 4, nrow = 1))
+colnames(overlap_charges) = c("overlap_no","Freq","max_charge","peptide")
+
+max_charges = c(1,2,3)
+
+for(seq in sequences[c(1:50)]){
+  print(seq)
+  for(max_c in max_charges){
+    charge_states = c(1:max_c)
+    masses = frag_masses(seq, etd_all, min_size = 2, charges_considered = charge_states)
+    print(length(masses))
+    over_tab = calculate_overlapping(masses, error_tolerance)
+    over_tab$max_charge = max_c
+    over_tab$peptide = seq
+    overlap_charges = rbind(overlap_charges, over_tab)
+    
+  }
+}
+
+save(overlap_charges, file="table4.rds")
+load("table4.rds")
+```
+
+```{r}
+
+overlap_charges_sum <- overlap_charges %>%
+  filter(!is.null(peptide)) %>%
+  mutate(overlap_no = as.numeric(overlap_no)) %>% 
+  mutate(overlap_no = replace(overlap_no, overlap_no >= 5, 5))  %>%
+  group_by(overlap_no, max_charge) %>%
+  summarise_at(vars(-peptide), ~sum(., na.rm=TRUE)) %>%
+  ungroup()%>%
+  group_by(max_charge) %>%
+  mutate(Ratio = Freq/ sum(Freq))%>%
+  filter(overlap_no != 1)
+  
+
+num_colors <- length(unique(overlaps_tables_sum$overlap_no))
+custom_colors <- c(brewer.pal(num_colors, "OrRd")[2:4],"purple" ) 
+
+
+
+g_o_charge = ggplot(overlap_charges_sum, aes(x = factor(max_charge), y = Ratio, fill = factor(overlap_no))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Max Charge", y = "Ratio", fill = "overlaping fragments") +
+  ylim(0, 0.5)+ 
+  scale_fill_manual(labels=c( "2","3","4","5+"),values = custom_colors) + theme_linedraw() +theme(legend.position = c(0.15, 0.75)) 
+g_o_charge
+
+#remo
+
+
+overlaps_tables_sum <- overlaps_tables %>%
+  filter(!is.null(peptide_length)) %>%
+  mutate(overlap_no = as.numeric(overlap_no)) %>%
+  mutate(overlap_no = replace(overlap_no, overlap_no >= 5, 5))  %>%
+  group_by(overlap_no, peptide_length) %>%
+  summarise_at(vars(-peptide), funs(sum(., na.rm=TRUE))) %>%
+  ungroup() %>%
+  group_by(peptide_length) %>%
+  mutate(Ratio = Freq/ sum(Freq)) %>%
+  filter(overlap_no != 1) 
+
+ggsave(g, file="overlap_charge.svg", width = 5, height = 6)
+
+```
+
+#### Influence of MS2 mass tolerance
+
+```{r}
+seqs = all_pept_table[all_pept_table$length==20,]$sequence
+
+overlap_tolerance = data.frame(matrix(ncol = 4, nrow = 1))
+colnames(overlap_tolerance) = c("overlap_no","Freq","tolerance","peptide")
+
+print(seqs)
+for(seq in seqs[c(1:50)]){
+  print(seq)
+  masses = frag_masses(seq, etd_all, min_size = 2)
+  for(error_tolerance in c(0,0.000000001,0.001,1,5,10,15,20)){
+    print(length(masses))
+    over_tab = calculate_overlapping(masses, error_tolerance)
+    over_tab$tolerance = error_tolerance
+    over_tab$peptide = seq
+    overlap_tolerance = rbind(overlap_tolerance, over_tab)
+  }
+}
+
+save(overlap_tolerance, file ="table5.rds")
+load(file = "table5.rds" )
+
+```
+
+```{r}
+
+overlap_tolerance_sum <- overlap_tolerance %>%
+  filter(!is.null(peptide)) %>%
+  mutate(overlap_no = as.numeric(overlap_no)) %>% 
+  mutate(overlap_no = replace(overlap_no, overlap_no >= 5, 5))  %>%
+  group_by(overlap_no, tolerance) %>%
+  summarise_at(vars(-peptide), ~sum(., na.rm=TRUE)) %>%
+  ungroup()%>%
+  group_by(tolerance) %>%
+  mutate(Ratio = Freq/ sum(Freq))%>%
+  filter(overlap_no != 1) %>%
+  filter(tolerance %in% c(0,1,5,10,20))
+
+num_colors <- length(unique(overlap_tolerance_sum$overlap_no))
+custom_colors <- c(brewer.pal(num_colors, "OrRd")[2:4],"purple" ) 
+
+g_o_ppm = ggplot(overlap_tolerance_sum, aes(x = factor(tolerance), y = Ratio, fill = factor(overlap_no))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Tolerance (PPM)", y = "Ratio", fill = "overlaping fragments") +
+  ylim(0, 0.5)+ 
+  scale_fill_manual(labels=c( "2","3","4","5+"),values = custom_colors) + theme_linedraw() +theme(legend.position = c(0.15, 0.75)) 
+g_o_ppm
+
+
+
+ggsave(g_o_ppm, file="overlap_ppm.svg", width = 4, height = 6)
+
+```
+
+#### Influence of considered fragmentation method
+
+```{r}
+
+seqs = all_pept_table[all_pept_table$length==20,]$sequence
+
+overlap_frameth = data.frame(matrix(ncol = 4, nrow = 1))
+coverage_frameth = data.frame(matrix(ncol=3,nrow=1))
+colnames(overlap_frameth) = c("overlap_no","Freq","method","peptide")
+colnames(coverage_frameth) = c("coverage","method","peptide")
+
+error_tolerance = 5
+
+for(seq in seqs[c(1:50)]){
+  print(seq)
+  i=0
+  for(fragment_type in fragment_types_list){
+    print(fragment_type)
+    masses = frag_masses(seq,fragment_type, min_size = 2)
+    print(length(masses))
+    over_tab = calculate_overlapping(masses, error_tolerance)
+    cover_tab = coverage(error_intervals(masses, error_ppm=error_tolerance), c(100,mw(seq)))
+    over_tab$method = i
+    cover_tab$method = i
+    over_tab$peptide = seq
+    cover_tab$peptide = seq
+    overlap_frameth = rbind(overlap_frameth, over_tab)
+    cover_tab = as.data.frame(cover_tab)
+    colnames(cover_tab) = c("coverage","method","peptide")
+    coverage_frameth = rbind(coverage_frameth, cover_tab)
+    i=i+1
+  }
+}
+
+
+save(overlap_frameth, file="table6.rds")
+
+load(file="table6.rds")
+```
+
+```{r}
+fragtype = c("ETD", "CID", "ETHCD", "UVPD")
+
+overlap_frameth_sum <- overlap_frameth %>%
+  filter(!is.null(peptide)) %>%
+  mutate(overlap_no = as.numeric(overlap_no)) %>% 
+  mutate(overlap_no = replace(overlap_no, overlap_no >= 5, 5))  %>%
+  group_by(overlap_no, method) %>%
+  summarise_at(vars(-peptide), ~sum(., na.rm=TRUE)) %>%
+  ungroup()%>%
+  group_by(method) %>%
+  mutate(Ratio = Freq/ sum(Freq))%>%
+  filter(overlap_no != 1)
+
+num_colors <- length(unique(overlap_frameth_sum$overlap_no))
+custom_colors <- c(brewer.pal(num_colors, "OrRd")[2:4],"purple" ) 
+
+g_o_frag_meth = ggplot(overlap_frameth_sum, aes(x = factor(method), y = Ratio, fill = factor(overlap_no))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Fragmentation method", y = "Ratio", fill = "overlapping fragments") +
+  ylim(0, 0.5) + 
+  scale_fill_manual(labels = c("2", "3", "4", "5+"), values = custom_colors) + theme_linedraw() + theme(legend.position = c(0.15, 0.75)) +
+  scale_x_discrete(labels = fragtype)  # Adding x-axis labels from the 'fragtype' vector
+g_o_frag_meth
+
+ggsave(g_o_frag_meth, file="overlap_frag_method.svg", width = 4, height = 6)
+```
+
+```{r}
+
+library(ggplot2)
+library(ggpubr)
+
+figure <- ggarrange(g_o_charge, g_o_ppm, g_o_frag_meth,
+                    labels = c("A", "B", "C"),
+                    ncol = 3, nrow = 1)
+
+figure
+
+```
