@@ -1,0 +1,485 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+library(viridis)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+
+```
+
+#### 
+
+```{}
+```
+
+# MAIN
+
+## Coverage matrix FUNCTIONS
+
+```{r}
+
+get_frag_intens = function(folder_path, cosine_threshold = 0){
+  file_list <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+  
+  main_df <- file_list %>%
+    map_dfr(~ read_csv(.x, show_col_types = FALSE) %>% 
+    mutate(filename = basename(.x)) ) %>%
+    select(-1) 
+  
+  #remove match to precursor:
+  main_df = main_df %>% filter(!(start_pos == 0 & end_pos == max(end_pos)))
+  
+  
+  print(head(main_df))
+  
+  frag_intens = main_df %>%
+    mutate(start_pos = start_pos+1) %>%
+    filter(cosine_similarity > cosine_threshold ) %>% 
+    #filter(cosine_similarity > 0.85 | frag_dir %in% c("I")) %>% 
+    #filter( n_over_term == 0 | frag_dir %in% c("C", "N") )%>%
+    #filter(ActivationType == "CID") %>%
+    #filter(n_theo_iso >1) %>%
+    filter(intensity!=0)%>%
+    #mutate(intensity = intensity/n_over_tot)%>%
+    group_by(start_pos, end_pos, filename) %>%
+    summarise(total_intensity = sum(intensity), .groups = 'drop') %>%
+    group_by(start_pos, end_pos) %>%
+    summarise(total_intensity = mean(total_intensity), .groups = 'drop')
+  
+  return(frag_intens)
+}
+
+generate_coverage_matrix = function(frag_intens,mod1_position = NULL, mod2_position =NULL){
+  
+    
+  cell_width = 1
+  cell_height = 1
+  
+  x_ticks <- max(frag_intens$end_pos)
+  y_ticks <- max(frag_intens$end_pos)
+  
+  
+  n_terminal_coverage = sum()
+  
+  
+  bottom_row <- data.frame(
+    xmin = max(frag_intens$end_pos)+cell_width/2,  # Minimum end_pos value
+    xmax = min(frag_intens$end_pos-1)-cell_width/2,  # Maximum end_pos value
+    ymin = min(frag_intens$start_pos)-cell_height/2,  # Minimum start_pos value
+    ymax = min(frag_intens$start_pos)+cell_height/2 # Maximum start_pos value
+  )
+  
+  first_col <- data.frame(
+    ymin = min(frag_intens$start_pos)-cell_width/2,  # Minimum end_pos value
+    ymax = max(frag_intens$start_pos)+cell_width/2,  # Maximum end_pos value
+    xmin = max(frag_intens$end_pos)+cell_height/2,  # Minimum start_pos value
+    xmax = max(frag_intens$end_pos)-cell_height/2 # Maximum start_pos value
+  )
+  
+  color_palette <- c("white", "orange", "black")
+  
+
+    p <- ggplot(frag_intens, aes(x = end_pos, y = start_pos, fill = log10(total_intensity))) +
+  geom_tile(colour = "black", size = 0.1, width = cell_width, height = cell_height) +
+    scale_fill_gradientn(colors = rev(viridis(100)), na.value = "grey90") +
+  labs(x = "End Pos", y = "Start Pos", fill = "Total Intensity") +
+  theme_bw() +
+  labs(x = "", y = "") +
+  theme(panel.grid = element_blank(),
+        panel.border = element_blank(),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  annotate("rect", xmin = bottom_row$xmin, xmax = bottom_row$xmax, ymin = bottom_row$ymin, ymax = bottom_row$ymax, fill = NA, color = "#bd263dff", size = 0.81) +
+  annotate("rect", xmin = first_col$xmin, xmax = first_col$xmax, ymin = first_col$ymin, ymax = first_col$ymax, fill = NA, color = "#507477ff", size = 0.81)+
+  scale_x_reverse(breaks = seq(min(frag_intens$start_pos), max(frag_intens$end_pos))) +
+  scale_y_continuous(breaks = seq(min(frag_intens$start_pos), max(frag_intens$end_pos)))+
+      ggtitle(folder_path)
+  # geom_text(aes(x = max(frag_intens$end_pos), y = max(frag_intens$start_pos),
+  #               label = paste("N Terminal fragment coverage:", round(n_terminal_coverage, 2), "%\n",
+  #                             "C Terminal fragment coverage:", round(c_terminal_coverage, 2), "%\n",
+  #                             "Internal fragment coverage:", round(internal_coverage, 2), "%")),
+  #           hjust = 1, vjust = 1, size = 4)
+    
+    
+    
+  # Define default positions for rectangles if not specified
+  if (is.null(mod1_position) || is.null(mod1_position) ) {
+    # Calculate default positions based on data
+    print("not mod specified")
+  } else {
+    
+    first_mod = min(c(mod1_position, mod2_position))
+    second_mod = max(c(mod1_position, mod2_position))-1
+    
+    C_term_rect <- data.frame(
+    ymin = min(frag_intens$start_pos)-cell_width/2,  # Minimum end_pos value
+    ymax = first_mod-cell_width/2,  # Maximum end_pos value
+    xmin = second_mod+cell_height/2,  # Minimum start_pos value
+    xmax = first_mod-cell_height/2 # Maximum start_pos value
+  )
+    N_term_rect <- data.frame(
+    ymin = first_mod-cell_height/2,  # Minimum end_pos value
+    ymax = second_mod+cell_width/2,  # Maximum end_pos value
+    xmin = max(frag_intens$end_pos)+cell_width/2,
+    xmax = second_mod+cell_height/2 # Maximum start_pos value
+  )
+    
+    # Add annotation only if positions are specified
+    p <- p +
+      annotate(
+        "rect",
+        xmin = C_term_rect$xmin,
+        xmax = C_term_rect$xmax,
+        ymin = C_term_rect$ymin,
+        ymax = C_term_rect$ymax,
+        fill = NA,
+        color = "purple",
+        size = 0.8
+      ) +
+      annotate(
+        "rect",
+        xmin = N_term_rect$xmin,
+        xmax = N_term_rect$xmax,
+        ymin = N_term_rect$ymin,
+        ymax = N_term_rect$ymax,
+        fill = NA,
+        color = "purple",
+        size = 0.81
+      )
+}
+  return(p)
+}
+
+
+
+
+```
+
+```{r}
+
+
+
+
+folder_paths <- c("data/H3_MOD/H3_TAIL_MOD_SHIFT_DIV_all","data/H3_MOD/H3_TAIL_MOD_SHIFT_DIV_all","data/H3_MOD/H3_TAIL_MOD_DIV_all","data/H3_MOD/H3_TAIL_MOD_all","data/H3_MOD/H3_TAIL_MOD_SHIFT_all","data/H3_MOD/H3_SHIFT_k9_a","data/H3_MOD/H3_k9_a")
+
+plots = list()
+
+i=1
+for(folder_path in folder_paths){
+  
+  frag_intens = get_frag_intens(folder_path, cosine_threshold = 0.8)
+  
+  plot = generate_coverage_matrix(frag_intens, mod1_position = 14, mod2_position = 9)
+  plots[[i]] = plot
+  i = i+1
+}
+  
+
+plots[[4]]
+plots[[5]]
+plots[[6]]
+plots[[7]]
+
+ggsave(plots[[4]], file="cov_mat_H3_mod_shift1.png", height = 11, width = 12)
+ggsave(plots[[5]], file="cov_mat_H3_mod_shift2.png", height = 11, width = 12)
+
+ggsave(plots[[6]], file="cov_mat_H3_modk9_shift.svg", height = 11, width = 12)
+ggsave(plots[[7]], file="cov_mat_H3_modk9_noshift.svg", height = 11, width = 12)
+
+
+```
+
+```{r}
+
+difference_coverage_matrix = function(frag_intens1, frag_intens2,  mod1_position =NULL, mod2_position =NULL){
+  
+  # Merge frag_intens1 and frag_intens2 based on start_pos and end_pos
+  frag_intens <- merge(frag_intens1, frag_intens2, by = c("start_pos", "end_pos"), all = TRUE)
+  
+  frag_intens[is.na(frag_intens)] <- 1
+  frag_intens = frag_intens %>% mutate(log_fc_intensity = log((total_intensity.y)/(total_intensity.x))) 
+  
+  cell_width <- 1
+  cell_height <- 1
+  
+  x_ticks <- max(frag_intens$end_pos)
+  y_ticks <- max(frag_intens$end_pos)
+  
+  n_terminal_coverage <- sum()
+  
+  bottom_row <- data.frame(
+    xmin = max(frag_intens$end_pos) + cell_width / 2,
+    xmax = min(frag_intens$end_pos) - cell_width / 2,
+    ymin = min(frag_intens$start_pos) - cell_height / 2,
+    ymax = min(frag_intens$start_pos) + cell_height / 2
+  )
+  
+  first_col <- data.frame(
+    ymin = max(frag_intens$start_pos) + cell_width / 2,
+    ymax = min(frag_intens$start_pos) - cell_width / 2,
+    xmin = max(frag_intens$end_pos) + cell_height / 2,
+    xmax = max(frag_intens$end_pos) - cell_height / 2
+  )
+  
+  color_palette <- c("blue" ,"white","darkred")
+
+p <- ggplot(frag_intens, aes(x = end_pos, y = start_pos, fill = log_fc_intensity)) +
+  geom_tile(colour = "black", size = 0.1, width = cell_width, height = cell_height) +
+  scale_fill_gradientn(
+    colors = color_palette,
+    na.value = "grey",
+    limits = c(-2,2),
+    oob = scales::squish
+  ) +
+  labs(x = "End Pos", y = "Start Pos", fill = "Total Intensity") +
+  theme_bw() +
+  labs(x = "", y = "") +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  annotate("rect", xmin = bottom_row$xmin, xmax = bottom_row$xmax, ymin = bottom_row$ymin, ymax = bottom_row$ymax, fill = NA, color = "#bd263dff", size = 0.8) +
+  annotate("rect", xmin = first_col$xmin, xmax = first_col$xmax, ymin = first_col$ymin, ymax = first_col$ymax, fill = NA, color = "#507477ff", size = 0.81) +
+  scale_x_reverse(breaks = seq(min(frag_intens$start_pos), max(frag_intens$end_pos))) +
+  scale_y_continuous(breaks = seq(min(frag_intens$start_pos), max(frag_intens$end_pos))) +
+  ggtitle(folder_path)
+  
+  if (is.null(mod1_position) || is.null(mod2_position)) {
+    print("No mod specified")
+  } else {
+    first_mod <- min(c(mod1_position, mod2_position))
+    second_mod <- max(c(mod1_position, mod2_position)) - 1
+    
+    C_term_rect <- data.frame(
+      ymin = min(frag_intens$start_pos) - cell_width / 2,
+      ymax = first_mod - cell_width / 2,
+      xmin = second_mod + cell_height / 2,
+      xmax = first_mod - cell_height / 2
+    )
+    
+    N_term_rect <- data.frame(
+      ymin = first_mod - cell_height / 2,
+      ymax = second_mod + cell_width / 2,
+      xmin = max(frag_intens$end_pos) + cell_width / 2,
+      xmax = second_mod + cell_height / 2
+    )
+    
+    p <- p +
+      annotate(
+        "rect",
+        xmin = C_term_rect$xmin,
+        xmax = C_term_rect$xmax,
+        ymin = C_term_rect$ymin,
+        ymax = C_term_rect$ymax,
+        fill = NA,
+        color = "purple",
+        size = 0.8
+      ) +
+      annotate(
+        "rect",
+        xmin = N_term_rect$xmin,
+        xmax = N_term_rect$xmax,
+        ymin = N_term_rect$ymin,
+        ymax = N_term_rect$ymax,
+        fill = NA,
+        color = "purple",
+        size = 0.81
+      )
+  }
+
+
+
+  
+  frag_its_test_df = frag_intens %>% filter(
+    ( start_pos<mod1_position & end_pos<mod2_position & end_pos>=mod1_position ) |
+    ( end_pos>mod2_position & start_pos<mod2_position & start_pos>=mod1_position )) 
+  
+  density_df = frag_its_test_df %>%
+  gather(key = "sample", value = "intensity", total_intensity.x, total_intensity.y)
+
+    
+  # Create a barplot with boxplot and jittered data points
+plot <- ggplot(density_df, aes(x = sample, y = log10(intensity))) +
+  geom_violin() +
+  #geom_jitter(position = position_jitter(0.2), alpha = 0.5) +
+  labs(title = "Boxplot with Scatter of Data Points",
+       x = "Category",
+       y = "Value") +theme_minimal()
+
+# Perform t-test between Group1 and Group2
+t_test_result <- wilcox.test(frag_its_test_df$total_intensity.x, frag_its_test_df$total_intensity.y, paired = TRUE)
+
+# Extract the p-value from the t-test result
+p_value <- t_test_result$p.value
+
+  
+  p = p + annotation_custom(
+    ggplotGrob(plot), ymin=25, xmin=-25
+  ) + labs(subtitle = p_value)
+  return(p)
+}
+
+
+
+
+
+```
+
+```{r}
+
+frag_intens_ac23 = get_frag_intens("data/H3_MOD/H3_TAIL_MOD_all")
+frag_intens_ac27 = get_frag_intens("data/H3_MOD/H3_TAIL_MOD_SHIFT_all")
+
+plot = difference_coverage_matrix(frag_intens1 = frag_intens_ac27, frag_intens2 = frag_intens_ac23,  mod1_position = 23, mod2_position = 27)
+
+
+plot
+```
+
+```{r}
+
+
+frag_intens_ac23 = get_frag_intens("data/H3_MOD/H3_k9_a")
+frag_intens_ac37 = get_frag_intens("data/H3_MOD/H3_SHIFT_k9_a")
+
+plot = difference_coverage_matrix(frag_intens1 = frag_intens_ac23, frag_intens2 = frag_intens_ac37,  mod1_position = 9, mod2_position = 14)
+
+
+plot
+
+ggsave(plot, file="cov_mat_H3_modk9_difference.svg", height = 10, width = 12)
+```
+
+```{r}
+frag_intens_1 = get_frag_intens("data/H3_MOD/H3_k9_a")
+frag_intens_2 = get_frag_intens("data/H3_MOD/H3_SHIFT_k9_a")
+
+m1p = 9
+m2p = 14
+
+frag_intens_1_filtered = frag_intens_1 %>% filter(
+    ( start_pos<m1p & end_pos<m2p & end_pos>=m1p ) |
+    ( end_pos>m2p & start_pos<m2p & start_pos>=m1p ))
+
+frag_intens_2_filtered = frag_intens_2 %>% filter(
+    ( start_pos<m1p & end_pos<m2p & end_pos>=m1p ) |
+    ( end_pos>m2p & start_pos<m2p & start_pos>=m1p ))
+
+
+
+merged_frag_int =  merge(frag_intens_1_filtered, frag_intens_2_filtered, by = c("start_pos", "end_pos"), all = TRUE)
+merged_frag_int[is.na(merged_frag_int)] = 0
+
+t.test(merged_frag_int$total_intensity.x, merged_frag_int$total_intensity.y, paired = TRUE)
+
+```
+
+/
+
+```{r}
+
+
+frag_intens_ac23 = get_frag_intens("data/H3_MOD/H3_-ac_a")
+frag_intens_ac37 = get_frag_intens("data/H3_MOD/H3_SHIFT_-ac_a")
+
+plot = difference_coverage_matrix(frag_intens1 = frag_intens_ac23, frag_intens2 = frag_intens_ac37,  mod1_position = 1, mod2_position = 2)
+
+
+plot
+```
+
+PROTEASOME
+
+```{r}
+
+
+folder_path <- "data/PROTEASOME/a9_plus_1-5_pos-100"
+file_list <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+
+main_df <- file_list %>%
+  map_dfr(~ read_csv(.x) %>% 
+  mutate(filename = basename(.x))) %>%
+  select(-1) 
+
+
+  frag_intens = main_df %>%
+    group_by(start_pos, end_pos, filename) %>%
+    summarise(total_intensity = sum(intensity)) %>%
+    group_by(start_pos, end_pos) %>%
+    summarise(total_intensity = mean(total_intensity))
+  
+  
+  ###Try summarizing by the number of charge state per fragment  
+
+plot = generate_coverage_matrix(frag_intens, mod1_position = 23, mod2_position = 27)
+plot
+
+
+df = main_df %>% filter(cosine_similarity > 0.9) #%>% filter(match_iso>1)
+frag_site_df = summarize_frag_sites(df)
+
+# Create a bar plot to visualize the summarized intensity
+ggplot(frag_site_df, aes(x = frag_site, y = total_intensity, fill = ion_type)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.6) +
+  labs(x = "Fragment Site", y = "Total Intensity", fill = "Ion Type") +
+  scale_fill_manual(values = c("N" = "blue", "C" = "green", "I_N" = "red", "I_C" = "purple")) +
+  theme_minimal()
+
+
+
+
+```

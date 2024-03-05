@@ -1,0 +1,377 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+```
+
+#### Load Data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+folder_path <- '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output_final/h3_tail/centroided/'
+file_suffix = "h3tail_competitive_centroided_plusminus"
+
+folder_path <- '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_shifts/25unmod/nodeconv_n_r/'
+file_suffix = "h3tail_distinct_centroided_plusminus"
+
+folder_path <- '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output_final/h3_tail/deconvoluted/'
+file_suffix = "h3tail_competitive_deconvoluted_plusminus"
+
+folder_path <- '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_full/centroided/'
+file_suffix = "h3full_competitive_centroided_plusminus"
+
+
+folder_path <- '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output_final_2/h3_full/centroided/'
+file_suffix = "h3full_competitive_centroided_plusminus"
+
+folder_path <- '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output_final_2/h3_full/deconvoluted/'
+file_suffix = "h3full_competitive_deconvoluted_plusminus"
+
+
+txt_files <- list.files(path = folder_path, pattern = "\\.txt$", full.names = TRUE, recursive = TRUE)
+txt_files
+
+data_frames <- list()
+for (file in txt_files) {
+  data <- read.table(file, header = FALSE, sep = "\t")
+  data$filename <- basename(file)
+  colnames(data) = c("start","end","delta.mass","pval.diff.intern","pval.wilc.intern","diff.intern","pval.diff.term","pval.wilc.term","diff.term", "filename")
+  data$distance.shift <- sub(".+_(\\d+)\\..+", "\\1", data$filename)
+  data_frames <- append(data_frames, list(data))
+}
+
+combined_data <- do.call(rbind, data_frames)
+row.names(combined_data) <- NULL
+print(combined_data)
+
+
+
+```
+
+# MAIN
+
+## P-val differences SDI, term sliding mass shift
+
+```{r}
+# Load the necessary libraries if not already installed
+library(ggplot2)
+library(tidyr)
+
+# Convert 'start' column to numeric in case it's not already
+combined_data$start <- as.numeric(combined_data$start)
+combined_data$pval.diff.term <- as.numeric(combined_data$pval.diff.term)
+combined_data$pval.diff.intern <- as.numeric(combined_data$pval.diff.intern)
+combined_data$diff.intern<- as.numeric(combined_data$diff.intern)
+combined_data$diff.term <- as.numeric(combined_data$diff.term)
+# Convert the dataframe to long format, handle 'NA' values
+long_data <- pivot_longer(combined_data, cols = c(pval.diff.intern, pval.diff.term), names_to = "pval_type", values_to = "pval_value")
+long_data$pval_value = as.numeric(long_data$pval_value)
+long_data$pval_value[is.na(long_data$pval_value)] <- 1
+
+# Set the significance thresholds
+alpha_5 <- -log10(0.05)
+alpha_1 <- -log10(0.01)
+alpha_100 <- -log10(1)
+
+# Define labels for facets, x-axis, and y-axis
+facet_labels <- c("methylation" = "Methylation (14.02 AA)", "acetylation" = "Acetylation (42.01 AA)", "phosphorylation" = "Phosphorylation (80.00 AA)")
+x_axis_label <- "Start position mass shift (AA)"
+y_axis_label <- "-log10(pvalue)"
+
+
+# Plot in a 3x2 grid with adapted legends and labels
+plot = ggplot(long_data, aes(x = start, y = -log10(pval_value), shape = as.factor(distance.shift))) +
+  geom_point(size = 1) +
+  geom_line(aes(group = interaction(delta.mass, distance.shift)), alpha = 0.5, size = 0.3) +
+  scale_y_continuous(trans = "reverse", breaks = c(alpha_1, alpha_5, alpha_100), labels = c("1% Alpha", "5% Alpha", "pval = 1")) +
+  facet_grid(delta.mass ~ pval_type, scales = "free_y") +
+  #scale_x_continuous(breaks = c(), labels = c()) +  # Remove x-axis labels
+  labs(title = "Scatter Plot of -log10(pvalue) vs. Start position",
+       x = x_axis_label,
+       y = y_axis_label) +
+  geom_hline(yintercept = alpha_100, linetype = "dotted", color = "red", name = "pval = 1") + geom_hline(yintercept = c(alpha_1, alpha_5), linetype = "dotted", color = "green") +
+  theme_bw() +
+  theme(legend.position = "right",
+        strip.text = element_text(size = 10),  # Adjust strip text size
+        strip.background = element_blank())  # Remove strip background
+
+
+plot
+# Save the plot as an SVG file
+ggsave(paste0("mass_shift_pval_", file_suffix ,".svg"), plot, device = "svg", width = 15, height = 7)
+
+
+
+
+# Calculate the percentage of p-values below 1% threshold for each starting position
+pct_below_1percent <- long_data %>%
+  mutate(is_below_threshold = pval_value < 0.01) %>%
+  group_by(start, pval_type) %>%
+  summarise(percentage = mean(is_below_threshold) * 100) 
+  
+
+# Convert data to long format
+heatmap_data_long <- pct_below_1percent %>%
+  pivot_longer(cols = c(pval.diff.intern, pval.diff.term), names_to = "Facet", values_to = "Percentage")
+
+# Plot the heatmap for internal facet
+heatmap <- ggplot(pct_below_1percent, aes(x = start, y = pval_type, fill = percentage)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "white", mid = "#38cfab", high = "#012042", limits = c(0, 100),midpoint = 50, name = "Percentage") +
+  labs(title = "Percentage of p-values below 1% threshold (Internal)",
+       x = "Start position") +
+  theme_bw()
+
+
+
+# Display individual heatmaps
+print(heatmap)
+
+
+ggsave(paste0("mass_shift_heatmap_types_", file_suffix ,".svg"), heatmap, device = "svg", width = 15, height = 7)
+
+
+
+# Calculate the percentage of p-values below 1% threshold for each starting position
+pct_below_1percent <- long_data %>%
+  mutate(is_below_threshold = pval_value < 0.01) %>%
+  group_by(start, delta.mass, distance.shift) %>%
+  summarise(is_below_threshold = any(is_below_threshold)) %>%
+  ungroup() %>%
+  group_by(start) %>%
+  summarise(percentage = mean(is_below_threshold) * 100) 
+  
+
+
+# Plot the heatmap for internal facet
+heatmap <- ggplot(pct_below_1percent, aes(x = start, fill = percentage, y = 1)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "white", mid = "#38cfab", high = "#012042", limits = c(0, 100),midpoint = 50, name = "Percentage") +
+  labs(title = "Percentage of p-values below 1% threshold (Internal)",
+       x = "Start position") +
+  theme_bw()
+
+
+
+# Display individual heatmaps
+print(heatmap)
+
+ggsave(paste0("mass_shift_heatmap_combined_", file_suffix ,".svg"), heatmap, device = "svg", width = 15, height = 7)
+
+```
+
+## SDI difference sliding shift
+
+```{r}
+# Load the necessary libraries if not already installed
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Convert 'start' column to numeric in case it's not already
+combined_data$start <- as.numeric(combined_data$start)
+combined_data$diff.intern <- as.numeric(combined_data$diff.intern)
+combined_data$diff.term <- as.numeric(combined_data$diff.term)
+
+# Convert the dataframe to long format, handle 'NA' values
+long_data <- pivot_longer(combined_data, cols = c(diff.intern, diff.term), names_to = "diff_type", values_to = "diff_value")
+long_data$diff_value = as.numeric(long_data$diff_value)
+long_data$diff_value[is.na(long_data$diff_value)] <- 0
+
+# Average values for different window sizes
+averaged_data <- long_data %>%
+  group_by(start, diff_type, delta.mass) %>%
+  summarize(avg_diff_value = mean(diff_value))
+
+# Define labels for facets, x-axis, and y-axis
+facet_labels <- c("methylation" = "Methylation (14.02 AA)", "acetylation" = "Acetylation (42.01 AA)", "phosphorylation" = "Phosphorylation (80.00 AA)")
+x_axis_label <- "Start position mass shift (AA)"
+y_axis_label <- "Average Intensity Difference"
+
+# Plot in a 3x2 grid with adapted legends and labels
+plot = ggplot(averaged_data, aes(x = start, y = avg_diff_value)) +
+  geom_bar(stat = "identity", position = "identity", width = 0.5) +
+  facet_grid(delta.mass ~ diff_type, scales = "free_y") +
+  labs(title = "Bar Plot of Average Mass Shift vs. Start position",
+       x = x_axis_label,
+       y = y_axis_label) +
+  theme_bw() +
+  theme(legend.position = "right",
+        strip.text = element_text(size = 10),  
+        strip.background = element_blank())+
+  geom_hline(yintercept = 0,  color = "red")
+
+
+
+
+
+plot
+# Save the plot as an SVG file
+ggsave(paste0("mass_shift_itsdiff_", file_suffix ,".svg"), plot, device = "svg", width = 15, height = 7)
+
+
+mean(long_data[long_data$diff_type == "diff.intern",]$diff_value)
+mean(long_data[long_data$diff_type == "diff.term",]$diff_value)
+
+mean(long_data[long_data$diff_type == "diff.term",]$diff_value)/mean(long_data[long_data$diff_type == "diff.intern",]$diff_value)
+
+
+
+```
+
+```{r}
+
+
+hist(combined_data$diff.intern)
+hist(combined_data$diff.term)
+
+
+```
+
+### Comparison settings technique
+
+```{r}
+
+# Load the necessary libraries if not already installed
+library(ggplot2)
+library(tidyr)
+
+# Function to read data from a folder
+read_data_from_folder <- function(folder_path, technique) {
+  txt_files <- list.files(path = folder_path, pattern = "\\.txt$", full.names = TRUE, recursive = TRUE)
+  
+  data_frames <- list()
+  for (file in txt_files) {
+    data <- read.table(file, header = FALSE, sep = "\t")
+    data$filename <- basename(file)
+    colnames(data) = c("start","end","delta.mass","pval.diff.intern","pval.wilc.intern","diff.intern","pval.diff.term","pval.wilc.term","diff.term", "filename")
+    data$distance.shift <- sub(".+_(\\d+)\\..+", "\\1", data$filename)
+    data_frames <- append(data_frames, list(data))
+  }
+  
+  combined_data <- do.call(rbind, data_frames)
+  row.names(combined_data) <- NULL
+  
+  # Add a new column indicating the origin folder
+  combined_data$origin_folder <- technique
+  
+  return(combined_data)
+}
+
+# Specify the folder paths and corresponding techniques
+folders <- c(
+  '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/OUTPUT/h3_tail/centroided/',
+  '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/OUTPUT/h3_tail/deconvoluted/',
+  '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_shifts/25unmod/deconv/',
+  '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_shifts/25unmod/no_deconv/',
+  '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/OUTPUT/h3_tail_decoy/centroided/',
+  '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/OUTPUT/h3_full/centroided/',
+    '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/OUTPUT/h4_full/centroided/',
+  '/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/OUTPUT/filgrastim/centroided/'
+)
+
+techniques <- c(
+  'H3_ntail.target.competitive.annotation.centroided',
+  'H3_ntail.target.competitive.annotation.deconvoluted',
+  'H3_ntail.target.distinct.annotation.deconvoluted',
+  'H3_ntail.target.distinct.annotation.centroided',
+  'H3_ntail.decoy.competitive.annotation.deconvoluted',
+  'H3.target.competitive.annotation.centroided',
+  'H4.target.competitive.annotation.centroided',
+  'filgrastim.target.competitive.annotation.centroided'
+)
+
+# Read data from each folder and assign the corresponding technique
+data_list <- Map(read_data_from_folder, folders, techniques)
+
+# Combine data into long format
+combined_data <- do.call(rbind, data_list)
+
+# Convert 'start' column to numeric in case it's not already
+combined_data$start <- as.numeric(combined_data$start)
+combined_data$pval.diff.term <- as.numeric(combined_data$pval.diff.term)
+combined_data$pval.diff.intern <- as.numeric(combined_data$pval.diff.intern)
+combined_data$diff.intern <- as.numeric(combined_data$diff.intern)
+combined_data$diff.term <- as.numeric(combined_data$diff.term)
+
+# Convert the dataframe to long format, handle 'NA' values
+long_data <- pivot_longer(combined_data, cols = c(pval.diff.intern, pval.diff.term), names_to = "pval_type", values_to = "pval_value")
+long_data$pval_value <- as.numeric(long_data$pval_value)
+long_data$pval_value[is.na(long_data$pval_value)] <- 1
+
+# Print the combined long format data
+print(long_data)
+
+```
+
+```{r}
+
+
+bxplt = ggplot(long_data, aes(x = origin_folder, y = -log10(pval_value), fill=pval_type)) +
+  geom_boxplot() +
+  geom_hline(yintercept = alpha_100, linetype = "dotted", color = "red", name = "pval = 1") + geom_hline(yintercept = c(alpha_1, alpha_5), linetype = "dotted", color = "green") +
+  theme_bw()  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+scale_y_continuous(trans = "reverse")
+
+ggsave(file = "boxplot_percent_significant_sliding_h3_tail.svg", bxplt)
+
+
+# Calculate the percentage of p-values below 0.01 for each group
+percentage_data <- long_data %>%
+  group_by(origin_folder, pval_type) %>%
+  summarize(percentage_below_0.01 = mean(pval_value < 0.01) * 100)%>%
+  separate(origin_folder, into = c("Protein","target_decoy" ,"Annotation_method", "annotation","Pre-processing"), sep = "\\.")%>%
+  mutate(pval_type = ifelse(pval_type %in% c("pval.diff.intern", "pval.diff.term"), "Internal", "Terminal"))
+
+write.csv(percentage_data, file="table_percentage_significant_sliding_mass_all_techniques.csv")
+
+
+
+```

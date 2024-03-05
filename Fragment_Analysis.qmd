@@ -1,0 +1,481 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+```
+
+#### Load Data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+folder_path <- "data/ETD40SA20"
+file_list <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+
+main_df <- file_list %>%
+  map_dfr(~ read_csv(.x) %>% 
+  mutate(filename = basename(.x))) %>%
+  select(-1) 
+
+
+#remove match to precursor:
+main_df = main_df %>% filter(!(start_pos == 0 & end_pos == max(end_pos)))
+```
+
+# MAIN
+
+## General Statistics
+
+### Score distribution
+
+```{r}
+
+# Create the stacked histogram with patterns
+ggplot(main_df, aes(x = cosine_similarity, fill = frag_dir)) +
+  geom_density(alpha = 0.7, aes(pattern = frag_dir)) +
+  labs(x = "Cosine Similarity", y = "Density") +
+  scale_fill_manual(values = c("I" = "grey", "N" = "#bd263dff", "C" = "#507477ff")) +
+  guides(fill = guide_legend(override.aes = list(pattern = c("I" = " ", "N" = " ", "C" = " ")))) +
+  theme_bw() +
+  theme(panel.grid = element_blank())+
+  xlim(c(0.3,1))  # Remove gridlines for better visibility
+
+
+# Load the ggridges package
+library(ggridges)
+
+# Create ridgeline plot
+ggplot(main_df, aes(x = cosine_similarity, y = as.factor(n_theo_iso), fill = frag_dir)) +
+  geom_density_ridges(alpha = 0.7) +
+  labs(x = "Cosine Similarity", y = "Theoretical max N isotopes", fill = "frag_dir") +
+  scale_fill_manual(values = c("I" = "grey", "N" = "#bd263dff", "C" = "#507477ff")) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  xlim(c(0.3, 1)) # Remove gridlines for better visibility
+
+
+```
+
+```{r}
+
+df = main_df %>% filter(cosine_similarity > 0.9)
+  
+  
+
+# Separate data for different ion types and create the frag_site column
+
+summarize_frag_sites = function(df){
+
+  c_data <- df %>%
+    filter(frag_dir == "C") %>%
+    group_by(start_pos, filename) %>%
+    summarise(total_intensity = -sum(intensity)) %>%
+    mutate(frag_site = start_pos, ion_type = "C")
+  
+  n_data <- df %>%
+    filter(frag_dir == "N") %>%
+    group_by(end_pos, filename) %>%
+    summarise(total_intensity = sum(intensity)) %>%
+    mutate(frag_site = end_pos, ion_type = "N")
+  
+  i_data <-df %>%
+    filter(frag_dir == "I") %>%
+    mutate(ion_type = "I_C") %>%
+    group_by(pos = start_pos, ion_type, filename)%>%
+    summarise(total_intensity = -sum(intensity) / 2) %>%
+    bind_rows(df %>%
+                filter(frag_dir == "I") %>%
+                mutate(ion_type = "I_N") %>%
+                group_by(pos = end_pos, ion_type, filename) %>%
+                summarise(total_intensity = sum(intensity) / 2)) %>%
+    mutate(frag_site = pos)
+  
+  # Combine the results for plotting
+  combined_data <- bind_rows(n_data, c_data, i_data) %>% 
+    group_by(frag_site, ion_type) %>% 
+    summarise(total_intensity = mean(total_intensity))
+  
+  return(combined_data)
+  }
+
+frag_site_df = summarize_frag_sites(df)
+
+# Create a bar plot to visualize the summarized intensity
+ggplot(frag_site_df, aes(x = frag_site, y = total_intensity, fill = ion_type)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.6) +
+  labs(x = "Fragment Site", y = "Total Intensity", fill = "Ion Type") +
+  scale_fill_manual(values = c("N" = "blue", "C" = "green", "I_N" = "red", "I_C" = "purple")) +
+  theme_minimal()
+
+
+```
+
+```{r}
+library(ggplot2)
+library(cowplot)
+
+lmp <- function (modelobject) {
+  if (class(modelobject) != "lm") stop("Not an object of class 'lm' ")
+  f <- summary(modelobject)$fstatistic
+  p <- pf(f[1], f[2], f[3], lower.tail = FALSE)
+  attributes(p) <- NULL
+  return(p)
+}
+
+sample = sub(pattern = "(.*)\\..*$", replacement = "\\1", basename(folder_path))
+
+frag_site_df = summarize_frag_sites(main_df) %>%
+  mutate(ion_type = as.factor(gsub("I_", "", ion_type))) %>%
+  group_by(ion_type, frag_site) %>%
+  summarise(total_intensity = sum(total_intensity)) %>%
+  spread(key = ion_type, value = total_intensity, fill = 0) %>%
+  mutate(C = -C)
+
+max_c = max(frag_site_df$C)
+max_n = max(frag_site_df$N)
+
+correlation_data <- data.frame()
+
+min_thresh = 0.3
+max_thresh = 1
+
+for (cos_sin_threshold in seq(max_thresh, min_thresh, -0.01)) {
+  
+  print(cos_sin_threshold)
+  df = main_df %>% filter(cosine_similarity > cos_sin_threshold | frag_dir %in% c("C", "N"))
+  
+  print(nrow(df))
+  
+  frag_site_df = summarize_frag_sites(df) %>%
+    mutate(ion_type = as.factor(gsub("I_", "", ion_type))) %>%
+    group_by(ion_type, frag_site) %>%
+    summarise(total_intensity = sum(total_intensity)) %>%
+    spread(key = ion_type, value = total_intensity, fill = 0) %>%
+    mutate(C = -C)
+  
+  lm.res = lm(C ~ N, data = frag_site_df)
+  coeff = coefficients(lm.res)
+  pval = formatC(lmp(lm.res), format = "e", digits = 5)
+  cor_val = cor(frag_site_df$C, frag_site_df$N)
+  
+  correlation_data <- rbind(correlation_data, data.frame(correlation = cor_val, pvalue = as.numeric(pval), threshold = cos_sin_threshold, intercept = coeff[1], slope = coeff[2]))
+  
+  p1 <- ggplot(frag_site_df, aes(x = N, y = C)) +
+    geom_point() +
+    geom_abline(intercept = coeff[1], slope = coeff[2], color = "red") +
+    labs(
+      x = "C Total Intensity",
+      y = "N Total Intensity",
+      title = paste0("pval = ", pval, ", cor = ", round(cor_val, 2))
+    ) +
+    xlim(0, max_n) +
+    ylim(0, max_c) +
+    theme_bw() 
+  
+  p2 <- ggplot(main_df, aes(x = cosine_similarity, fill = frag_dir)) +
+    geom_density(alpha = 0.7) +
+    labs(x = "Cosine Similarity", y = "Density") +
+    scale_fill_manual(
+      values = c("I" = "grey", "N" = "#bd263dff", "C" = "#507477ff"),
+      guide = guide_legend(override.aes = list(pattern = c("I" = " ", "N" = " ", "C" = " ")))
+    ) +
+    theme_bw() +
+    theme(panel.grid = element_blank()) +
+    geom_vline(xintercept = cos_sin_threshold, color = "red", linetype = "dashed") +
+    xlim(0.3, 1)
+  
+  frag_site_pos = summarize_frag_sites(df)
+  
+  p3 <- ggplot(frag_site_pos, aes(x = frag_site, y = total_intensity, fill = ion_type, , color = ion_type)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.6) +
+    labs(x = "Fragmentation Site (AA position)", y = "Summed Intensities (au)", fill = "Ion Type") +
+    scale_fill_manual(values = c("N" = "#bd263dff", "C" = "#507477ff", "I_C" = "grey", "I_N" = "grey")) +
+    scale_color_manual(values = c("N" = "black", "C" = "black", "I_C" = "black", "I_N" = "black")) +
+    theme_bw()
+  
+  p4 <- ggplot(correlation_data, aes(x = threshold, y = correlation)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Correlation Coefficient") +
+    theme_bw()+
+    ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  
+  p5 <- ggplot(correlation_data, aes(x = threshold, y = -log(pvalue))) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "-log(p-value)") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  
+  p7 <- ggplot(correlation_data, aes(x = threshold, y = slope)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Slope") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  layout <- matrix(c(1,1,2,2,
+                     3,3,3,3,
+                     4,5,6,7), ncol = 4, byrow = TRUE)
+  
+  combined_plot <- grid.arrange(p1, p2, p3,p4,p5,p6,p7,
+                                layout_matrix = layout)
+  
+  
+  
+  ggsave(
+    filename = paste0("results/combined_plots_", sample,"/", cos_sin_threshold * 1000, ".png"),
+    plot = combined_plot,
+    width = 12,
+    height = 8
+  )
+  
+  
+  # List of individual plots
+  individual_plots = list(p1, p2, p3, p4, p5, p6, p7)
+  i = 1
+  
+  # Base directory for saving plots
+  base_dir <- paste0("results/combined_plots_", sample,"/")  # Modify this according to your needs
+  
+  # Loop through individual plots
+  for (p in individual_plots) {
+    # Create the full directory path
+    full_dir <- file.path(base_dir, "separate", paste0("plot_", i))
+    
+    # Create the directory if it doesn't exist
+    if (!file.exists(full_dir)) {
+      dir.create(full_dir, recursive = TRUE)
+    }
+    
+    # Construct the filename
+    filename <- file.path(full_dir, paste0(cos_sin_threshold * 1000, ".svg"))
+    
+    if(i == 3 || i == 1 ){
+      width = 10
+      height = 6   
+    }else{
+        width=10
+        height=10
+      }
+    
+    # Save the plot using ggsave
+    ggsave(
+      filename = filename,
+      plot = p,
+      width = width,
+      height = height
+    )
+    
+    i = i + 1
+  }
+  
+}
+
+
+
+```
+
+```{r}
+specific_thresholds <- c(1, 0.85, 0.40)
+
+p1_l = list()
+p3_l = list()
+i = 1
+for (cos_sin_threshold in specific_thresholds) {
+  print(cos_sin_threshold)
+  df = main_df %>% filter(cosine_similarity > cos_sin_threshold | frag_dir %in% c("C", "N")) %>% 
+  
+  print(nrow(df))
+  
+  frag_site_df = summarize_frag_sites(df) %>%
+    mutate(ion_type = as.factor(gsub("I_", "", ion_type))) %>%
+    group_by(ion_type, frag_site) %>%
+    summarise(total_intensity = sum(total_intensity)) %>%
+    spread(key = ion_type, value = total_intensity, fill = 0) %>%
+    mutate(C = -C)
+  
+  lm.res = lm(C ~ N, data = frag_site_df)
+  coeff = coefficients(lm.res)
+  pval =lmp(lm.res)
+  cor_val = cor(frag_site_df$C, frag_site_df$N)
+  
+  correlation_data <- rbind(correlation_data, data.frame(correlation = cor_val, pvalue = as.numeric(pval), threshold = cos_sin_threshold, intercept = coeff[1], slope = coeff[2]))
+ 
+
+ 
+
+  
+
+  frag_site_pos = summarize_frag_sites(df)
+  
+  p3_l[[i]] <- ggplot(frag_site_pos, aes(x = frag_site, y = total_intensity, fill = ion_type, color = ion_type)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.6) +
+    labs(x = "Fragmentation Site (AA position)", y = "Summed Intensities (au)", fill = "Ion Type") +
+    scale_fill_manual(values = c("N" = "#bd263dff", "C" = "#507477ff", "I_C" = "grey", "I_N" = "grey")) +
+    scale_color_manual(values = c("N" = "black", "C" = "black", "I_C" = "black", "I_N" = "black")) +
+    theme_bw()+ guides(color = FALSE, fill = FALSE)
+  
+
+  
+
+  
+    p1_l[[i]] <- ggplot(frag_site_df, aes(x = N, y = C)) +
+    geom_point() +
+    geom_abline(intercept = coeff[1], slope = coeff[2], color = "red") +
+    labs(
+      x = "C-term Total Intensity",
+      y = "N-term Total Intensity"
+    ) +
+    xlim(0, max_n) +
+    ylim(0, max_c) +
+    theme_bw()
+
+    
+      i = i +1    
+}
+# Format pval in scientific notation with 2 decimal places
+formatted_pval <- format(pval, scientific = TRUE, digits = 2)
+
+# # Create the annotation with the formatted pval and rounded correlation coefficient
+# p1_l[[i]] <- p1_l[[i]] +
+#     annotate(
+#       "text",
+#       x = max_n * 0.95,  # Adjust the positioning as needed
+#       y = max_c * 0.95,  # Adjust the positioning as needed
+#       label = paste("pval =", formatted_pval, ", cor =", round(cor_val, 2)),
+#       hjust = 1,
+#       vjust = 1,
+#       box.color = "white",
+#       fill = "white",
+#       size = 4
+#     )
+
+    
+    p2 <- ggplot(main_df, aes(x = cosine_similarity, fill = frag_dir)) +
+    geom_density(alpha = 0.7) +
+    labs(x = "Cosine Similarity", y = "Density", fill = "Fragment direction") +  # Change "New Legend Label" to your desired label
+    scale_fill_manual(
+      values = c("I" = "grey", "N" = "#bd263dff", "C" = "#507477ff"),
+      guide = guide_legend(override.aes = list(pattern = c("I" = " ", "N" = " ", "C" = " ")))
+    ) +
+    theme_bw() +
+    theme(panel.grid = element_blank()) +
+    geom_vline(xintercept = specific_thresholds[1], color = "red", linetype = "dashed") +
+    geom_vline(xintercept = specific_thresholds[2], color = "red", linetype = "dashed") +
+    geom_vline(xintercept = specific_thresholds[3], color = "red", linetype = "dashed") +
+    scale_x_reverse(limits = c(max_thresh, min_thresh)) +
+    ggtitle("Score distribution of fragment's isotopic pattern")
+
+  
+  p4 <- ggplot(correlation_data, aes(x = threshold, y = correlation)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Correlation Coefficient") +
+    theme_bw()+
+    ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  
+  p5 <- ggplot(correlation_data, aes(x = threshold, y = -log(pvalue))) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "-log(p-value)") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  
+  p7 <- ggplot(correlation_data, aes(x = threshold, y = slope)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Slope") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+
+
+
+  
+layout <- matrix(c(1,1,1,
+                   2,2,3,
+                   4,4,5,
+                   6,6,7), ncol = 3, byrow = TRUE)
+  
+  combined_plot <- grid.arrange(p2,p3_l[[1]],p1_l[[1]],p3_l[[2]],p1_l[[2]],p3_l[[3]],p1_l[[3]],layout_matrix = layout)
+
+plot(combined_plot)
+```

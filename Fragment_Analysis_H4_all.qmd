@@ -1,0 +1,461 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+library(gridExtra)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+```
+
+#### Load Data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+folder_path <- "data/H4_all"
+file_list <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+
+main_df <- file_list %>%
+  map_dfr(~ read_csv(.x) %>% 
+  mutate(filename = basename(.x))) %>%
+  select(-1) 
+
+
+#remove match to precursor:
+main_df = main_df %>% filter(!(start_pos == 0 & end_pos == 102))%>% filter(!(start_pos == 0 & end_pos == 101))
+```
+
+# MAIN
+
+## General Statistics
+
+### Score distribution
+
+```{r}
+
+# Create the stacked histogram with patterns
+ggplot(main_df, aes(x = cosine_similarity, fill = frag_dir)) +
+  geom_density(alpha = 0.7, aes(pattern = frag_dir)) +
+  labs(x = "Cosine Similarity", y = "Density") +
+  scale_fill_manual(values = c("I" = "grey", "N" = "#bd263dff", "C" = "#507477ff")) +
+  guides(fill = guide_legend(override.aes = list(pattern = c("I" = " ", "N" = " ", "C" = " ")))) +
+  theme_bw() +
+  theme(panel.grid = element_blank())+
+  xlim(c(0.3,1))  # Remove gridlines for better visibility
+```
+
+```{r}
+
+# df = main_df %>% filter(ActivationType == "CID", CE == 60, !grepl("z16",filename)) %>% filter(frag_dir != "I")  # %>% filter(!(frag_dir == "I" & n_over_term > 0) )  %>% filter(cosine_similarity > 0.9)
+
+
+# df = main_df %>% filter(ActivationType == "ETD", ETDReactionTime == 15, EThcD==T,  !grepl("z16",filename), SupplementalActivationCE == 30) %>% filter(frag_dir != "I")  %>% filter(cosine_similarity > 0.95) 
+
+# Separate data for different ion types and create the frag_site column
+
+summarize_frag_sites = function(df){
+
+  c_data <- df %>%
+    filter(frag_dir == "C") %>%
+    group_by(start_pos, filename) %>%
+    summarise(total_intensity = -sum(intensity)) %>%
+    mutate(frag_site = start_pos, ion_type = "C")
+  
+  n_data <- df %>%
+    filter(frag_dir == "N") %>%
+    group_by(end_pos, filename) %>%
+    summarise(total_intensity = sum(intensity)) %>%
+    mutate(frag_site = end_pos, ion_type = "N")
+  
+  i_data <-df %>%
+    filter(frag_dir == "I") %>%
+    mutate(ion_type = "I_C") %>%
+    group_by(pos = start_pos, ion_type, filename)%>%
+    summarise(total_intensity = -sum(intensity) / 2) %>%
+    bind_rows(df %>%
+                filter(frag_dir == "I") %>%
+                mutate(ion_type = "I_N") %>%
+                group_by(pos = end_pos, ion_type, filename) %>%
+                summarise(total_intensity = sum(intensity) / 2)) %>%
+    mutate(frag_site = pos)
+  
+  # Combine the results for plotting
+  combined_data <- bind_rows(n_data, c_data, i_data) %>% 
+    group_by(frag_site, ion_type) %>% 
+    summarise(total_intensity = mean(total_intensity))
+  
+  return(combined_data)
+}
+
+main_df[is.na(main_df)] = 0
+
+## Get unique combinations from main_df
+unique_combinations <- main_df %>%
+  select(ActivationType, CE, SupplementalActivationCE, ETDReactionTime, EThcD, ETDSupplementalActivation) %>%
+  distinct()%>%
+  arrange(ActivationType, CE, SupplementalActivationCE, ETDReactionTime, EThcD, ETDSupplementalActivation)
+
+
+# Initialize an empty list to store the plots
+plots_list <- list()
+
+# Loop over unique combinations of parameters
+for (i in 1:nrow(unique_combinations)) {
+  ActivationType_val <- unique_combinations$ActivationType[i]
+  CE_val <- unique_combinations$CE[i]
+  SupplementalActivationCE_val <- unique_combinations$SupplementalActivationCE[i]
+  ETDReactionTime_val <- unique_combinations$ETDReactionTime[i]
+  EThcD_val <- unique_combinations$EThcD[i]
+  ETDSupplementalActivation_val <- unique_combinations$ETDSupplementalActivation[i]
+  
+  print(paste("ActivationType:", ActivationType_val, "CE:", CE_val, "SupplementalActivationCE:", SupplementalActivationCE_val, "ETDReactionTime:", ETDReactionTime_val, "EThcD:", EThcD_val, "ETDSupplementalActivation:", ETDSupplementalActivation_val))
+  
+  filtered_df <- main_df %>%
+    filter(ActivationType == ActivationType_val,
+           CE == CE_val,
+           SupplementalActivationCE == SupplementalActivationCE_val,
+           ETDReactionTime == ETDReactionTime_val,
+           EThcD == EThcD_val,
+           ETDSupplementalActivation == ETDSupplementalActivation_val)  %>%
+           #!grepl("z16", filename)) %>%
+    filter(frag_dir != "I") %>%
+    filter(cosine_similarity > 0.5)
+  
+  print(nrow(filtered_df))
+  
+  if (nrow(filtered_df) > 0) {  # Check if data exists for this combination
+    frag_site_df <- summarize_frag_sites(filtered_df)
+    
+    plot <- ggplot(frag_site_df, aes(x = frag_site, y = total_intensity, fill = ion_type)) +
+      geom_bar(stat = "identity", position = "stack", width = 0.6) +
+      labs(x = "Fragment Site", y = "Total Intensity", fill = "Ion Type") +
+      scale_fill_manual(values = c("N" = "blue", "C" = "green", "I_N" = "red", "I_C" = "purple")) +
+      theme_minimal() +
+      ggtitle(paste("ActivationType:", ActivationType_val, "CE:", CE_val, "SupplementalActivationCE:", SupplementalActivationCE_val, "ETDReactionTime:", ETDReactionTime_val, "EThcD:", EThcD_val, "ETDSupplementalActivation:", ETDSupplementalActivation_val))
+    
+    plots_list[[length(plots_list) + 1]] <- plot
+    
+    
+    
+    plot(plot)
+  }
+}
+
+i = 0 
+
+for(plot in plots_list){
+  i = i +1 
+  (plot(plot))
+      # Save the plot as a PNG file
+    plot_filename <- paste0("results/H4_frag_settings/plot_", i, ".png")
+    ggsave(plot_filename, plot, width = 8, height = 6, dpi = 300)
+
+    # Print a message indicating the plot has been saved
+    print(paste("Plot saved as:", plot_filename))
+  
+  }
+```
+
+```{r}
+library(ggplot2)
+library(cowplot)
+
+lmp <- function (modelobject) {
+  if (class(modelobject) != "lm") stop("Not an object of class 'lm' ")
+  f <- summary(modelobject)$fstatistic
+  p <- pf(f[1], f[2], f[3], lower.tail = FALSE)
+  attributes(p) <- NULL
+  return(p)
+}
+
+sample = sub(pattern = "(.*)\\..*$", replacement = "\\1", basename(folder_path))
+
+frag_site_df = summarize_frag_sites(main_df) %>%
+  mutate(ion_type = as.factor(gsub("I_", "", ion_type))) %>%
+  group_by(ion_type, frag_site) %>%
+  summarise(total_intensity = sum(total_intensity)) %>%
+  spread(key = ion_type, value = total_intensity, fill = 0) %>%
+  mutate(C = -C)
+
+max_c = max(frag_site_df$C)
+max_n = max(frag_site_df$N)
+
+correlation_data <- data.frame()
+
+min_thresh = 0.3
+max_thresh = 1
+
+main_df_selected = main_df %>% filter(ActivationType == "CID", CE == 60, !grepl("z20",filename)) %>% filter(!(frag_dir == "I" & n_over_term > 0) )
+
+for (cos_sin_threshold in seq(max_thresh, min_thresh, -0.02)) {
+  
+  print(cos_sin_threshold)
+  df = main_df_selected %>% filter(cosine_similarity > cos_sin_threshold | frag_dir %in% c("C", "N"))
+  
+  print(nrow(df))
+  
+  frag_site_df = summarize_frag_sites(df) %>%
+    mutate(ion_type = as.factor(gsub("I_", "", ion_type))) %>%
+    group_by(ion_type, frag_site) %>%
+    summarise(total_intensity = mean(total_intensity)) %>%
+    spread(key = ion_type, value = total_intensity, fill = 0) %>%
+    mutate(C = -C)
+  
+  lm.res = lm(C ~ N, data = frag_site_df)
+  coeff = coefficients(lm.res)
+  pval = formatC(lmp(lm.res), format = "e", digits = 5)
+  cor_val = cor(frag_site_df$C, frag_site_df$N)
+  
+  correlation_data <- rbind(correlation_data, data.frame(correlation = cor_val, pvalue = as.numeric(pval), threshold = cos_sin_threshold, intercept = coeff[1], slope = coeff[2]))
+  
+  # p1 <- ggplot(frag_site_df, aes(x = N, y = C)) +
+  #   geom_point() +
+  #   geom_abline(intercept = coeff[1], slope = coeff[2], color = "red") +
+  #   labs(
+  #     x = "C Total Intensity",
+  #     y = "N Total Intensity",
+  #     title = paste0("pval = ", pval, ", cor = ", round(cor_val, 2))
+  #   ) +
+  #   xlim(0, max_n) +
+  #   ylim(0, max_c) +
+  #   theme_bw() 
+  # 
+  # p2 <- ggplot(main_df, aes(x = cosine_similarity, fill = frag_dir)) +
+  #   geom_density(alpha = 0.7) +
+  #   labs(x = "Cosine Similarity", y = "Density") +
+  #   scale_fill_manual(
+  #     values = c("I" = "grey", "N" = "#bd263dff", "C" = "#507477ff"),
+  #     guide = guide_legend(override.aes = list(pattern = c("I" = " ", "N" = " ", "C" = " ")))
+  #   ) +
+  #   theme_bw() +
+  #   theme(panel.grid = element_blank()) +
+  #   geom_vline(xintercept = cos_sin_threshold, color = "red", linetype = "dashed") +
+  #   xlim(0.3, 1)
+  
+  frag_site_pos = summarize_frag_sites(df)
+  
+  # p3 <- ggplot(frag_site_pos, aes(x = frag_site, y = total_intensity, fill = ion_type, , color = ion_type)) +
+  #   geom_bar(stat = "identity", position = "stack", width = 0.6) +
+  #   labs(x = "Fragmentation Site (AA position)", y = "Summed Intensities (au)", fill = "Ion Type") +
+  #   scale_fill_manual(values = c("N" = "#bd263dff", "C" = "#507477ff", "I_C" = "grey", "I_N" = "grey")) +
+  #   scale_color_manual(values = c("N" = "black", "C" = "black", "I_C" = "black", "I_N" = "black")) +
+  #   theme_bw()
+  # 
+  # p4 <- ggplot(correlation_data, aes(x = threshold, y = correlation)) +
+  #   geom_point() +
+  #   labs(x = "Minimum Cosine Similarity", y = "Correlation Coefficient") +
+  #   theme_bw()+
+  #   ylim(c(-1,1))+
+  #   scale_x_reverse(limits=c(max_thresh,min_thresh))
+  # 
+  # 
+  # p5 <- ggplot(correlation_data, aes(x = threshold, y = -log(pvalue))) +
+  #   geom_point() +
+  #   labs(x = "Minimum Cosine Similarity", y = "-log(p-value)") +
+  #   theme_bw()+
+  #   #ylim(c(-1,1))+
+  #   scale_x_reverse(limits=c(max_thresh,min_thresh))
+  # 
+  # p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+  #   geom_point() +
+  #   labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+  #   theme_bw()+
+  #   #ylim(c(-1,1))+
+  #   scale_x_reverse(limits=c(max_thresh,min_thresh))
+  # 
+  # p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+  #   geom_point() +
+  #   labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+  #   theme_bw()+
+  #   #ylim(c(-1,1))+
+  #   scale_x_reverse(limits=c(max_thresh,min_thresh))
+  # 
+  # 
+  # p7 <- ggplot(correlation_data, aes(x = threshold, y = slope)) +
+  #   geom_point() +
+  #   labs(x = "Minimum Cosine Similarity", y = "Slope") +
+  #   theme_bw()+
+  #   #ylim(c(-1,1))+
+  #   scale_x_reverse(limits=c(max_thresh,min_thresh))
+
+  
+}
+
+
+
+```
+
+```{r}
+
+
+
+p4 <- ggplot(correlation_data, aes(x = threshold, y = correlation)) +
+  geom_point() +
+  labs(x = "Minimum Cosine Similarity", y = "Correlation Coefficient") +
+  theme_bw()+
+  ylim(c(-1,1))+
+  scale_x_reverse(limits=c(max_thresh,min_thresh))
+
+p4
+```
+
+```{r}
+specific_thresholds <- c(1, 0.85, 0.40)
+
+p1_l = list()
+p3_l = list()
+i = 1
+for (cos_sin_threshold in specific_thresholds) {
+  print(cos_sin_threshold)
+  df = main_df_selected %>% filter(cosine_similarity > cos_sin_threshold | frag_dir %in% c("C", "N"))
+  
+  print(nrow(df))
+  
+  frag_site_df = summarize_frag_sites(df) %>%
+    mutate(ion_type = as.factor(gsub("I_", "", ion_type))) %>%
+    group_by(ion_type, frag_site) %>%
+    summarise(total_intensity = mean(total_intensity)) %>%
+    spread(key = ion_type, value = total_intensity, fill = 0) %>%
+    mutate(C = -C)
+  
+  lm.res = lm(C ~ N, data = frag_site_df)
+  coeff = coefficients(lm.res)
+  pval = formatC(lmp(lm.res), format = "e", digits = 5)
+  cor_val = cor(frag_site_df$C, frag_site_df$N)
+  
+  correlation_data <- rbind(correlation_data, data.frame(correlation = cor_val, pvalue = as.numeric(pval), threshold = cos_sin_threshold, intercept = coeff[1], slope = coeff[2]))
+  
+  p1_l[[i]] <- ggplot(frag_site_df, aes(x = N, y = C)) +
+    geom_point() +
+    geom_abline(intercept = coeff[1], slope = coeff[2], color = "red") +
+    labs(
+      x = "C Total Intensity",
+      y = "N Total Intensity",
+      subtitle = paste0("pval = ", pval, ", cor = ", round(cor_val, 2))
+    ) +
+    xlim(0, max_n) +
+    ylim(0, max_c) +
+    theme_bw()
+  
+
+  frag_site_pos = summarize_frag_sites(df)
+  
+  p3_l[[i]] <- ggplot(frag_site_pos, aes(x = frag_site, y = total_intensity, fill = ion_type, color = ion_type)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.6) +
+    labs(x = "Fragmentation Site (AA position)", y = "Summed Intensities (au)", fill = "Ion Type") +
+    scale_fill_manual(values = c("N" = "#bd263dff", "C" = "#507477ff", "I_C" = "grey", "I_N" = "grey")) +
+    scale_color_manual(values = c("N" = "black", "C" = "black", "I_C" = "black", "I_N" = "black")) +
+    theme_bw()+ guides(color = FALSE, fill = FALSE)
+  
+  i = i +1
+  
+}
+  
+    p2 <- ggplot(main_df, aes(x = cosine_similarity, fill = frag_dir)) +
+    geom_density(alpha = 0.7) +
+    labs(x = "Cosine Similarity", y = "Density") +
+    scale_fill_manual(
+      values = c("I" = "grey", "N" = "#bd263dff", "C" = "#507477ff"),
+      guide = guide_legend(override.aes = list(pattern = c("I" = " ", "N" = " ", "C" = " ")))
+    ) +
+    theme_bw() +
+    theme(panel.grid = element_blank()) +
+    geom_vline(xintercept = specific_thresholds[1], color = "orange", linetype = "dashed") +
+    geom_vline(xintercept = specific_thresholds[2], color = "green", linetype = "dashed") +  
+    geom_vline(xintercept = specific_thresholds[3], color = "red", linetype = "dashed") +  
+    xlim(0.3, 1)
+  
+  p4 <- ggplot(correlation_data, aes(x = threshold, y = correlation)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Correlation Coefficient") +
+    theme_bw()+
+    ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  
+  p5 <- ggplot(correlation_data, aes(x = threshold, y = -log(pvalue))) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "-log(p-value)") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  p6 <- ggplot(correlation_data, aes(x = threshold, y = intercept)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Y intercept") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+  
+  
+  p7 <- ggplot(correlation_data, aes(x = threshold, y = slope)) +
+    geom_point() +
+    labs(x = "Minimum Cosine Similarity", y = "Slope") +
+    theme_bw()+
+    #ylim(c(-1,1))+
+    scale_x_reverse(limits=c(max_thresh,min_thresh))
+
+
+
+  
+layout <- matrix(c(1,1,1,
+                   2,2,3,
+                   4,4,5,
+                   6,6,7,
+                   8,9,10), ncol = 3, byrow = TRUE)
+  
+  combined_plot <- grid.arrange(p2,p3_l[[1]],p1_l[[1]],p3_l[[2]],p1_l[[2]],p3_l[[3]],p1_l[[3]],p5,p6,p7,layout_matrix = layout)
+
+plot(combined_plot)
+```

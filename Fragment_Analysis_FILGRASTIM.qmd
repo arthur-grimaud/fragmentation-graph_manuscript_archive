@@ -1,0 +1,166 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+library(gridExtra)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+```
+
+
+###
+
+```{r}
+summarize_frag_sites = function(df){
+
+  c_data <- df %>%
+    filter(frag_dir == "C") %>%
+    group_by(start_pos, filename) %>%
+    summarise(total_intensity = -sum(intensity)) %>%
+    mutate(frag_site = start_pos, ion_type = "C")
+  
+  n_data <- df %>%
+    filter(frag_dir == "N") %>%
+    group_by(end_pos, filename) %>%
+    summarise(total_intensity = sum(intensity)) %>%
+    mutate(frag_site = end_pos, ion_type = "N")
+  
+  i_data <-df %>%
+    filter(frag_dir == "I") %>%
+    mutate(ion_type = "I_C") %>%
+    group_by(pos = start_pos, ion_type, filename)%>%
+    summarise(total_intensity = -sum(intensity) / 2) %>%
+    bind_rows(df %>%
+                filter(frag_dir == "I") %>%
+                mutate(ion_type = "I_N") %>%
+                group_by(pos = end_pos, ion_type, filename) %>%
+                summarise(total_intensity = sum(intensity) / 2)) %>%
+    mutate(frag_site = pos)
+  
+  # Combine the results for plotting
+  combined_data <- bind_rows(n_data, c_data, i_data) %>% 
+    group_by(frag_site, ion_type) %>% 
+    summarise(total_intensity = mean(total_intensity))
+  
+  return(combined_data)
+}
+
+get_frag_intens = function(main_df){
+
+  #remove match to precursor:
+  main_df = main_df %>% filter(!(start_pos == 0 & end_pos == max(end_pos)))
+  
+  frag_intens = main_df %>%
+    filter(cosine_similarity > 0.85 ) %>% 
+    #filter(cosine_similarity > 0.85 | frag_dir %in% c("I")) %>% 
+    #filter( n_over_term == 0 | frag_dir %in% c("C", "N") )%>%
+    #filter(ActivationType == "CID") %>%
+    #filter(n_theo_iso >1) %>%
+    filter(intensity!=0)%>%
+    #mutate(intensity = intensity/n_over_tot)%>%
+    group_by(start_pos, end_pos, filename) %>%
+    summarise(total_intensity = sum(intensity), .groups = 'drop') %>%
+    group_by(start_pos, end_pos) %>%
+    summarise(total_intensity = mean(total_intensity), .groups = 'drop')
+  
+  return(frag_intens)
+}
+
+
+
+```
+
+
+###load data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+folder_path <- "data/FILGRASTIM_term_2"
+file_list <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+
+main_df <- file_list %>%
+  map_dfr(~ read_csv(.x) %>% 
+  mutate(filename = basename(.x))) %>%
+  select(-1) 
+```
+
+# MAIN
+##
+
+```{r}
+
+main_df[is.na(main_df)] = 0
+
+## Get unique combinations from main_df
+unique_combinations <- main_df %>%
+  select(ActivationType, CE, SupplementalActivationCE, ETDReactionTime, EThcD, ETDSupplementalActivation) %>%
+  distinct()%>%
+  arrange(ActivationType, CE, SupplementalActivationCE, ETDReactionTime, EThcD, ETDSupplementalActivation)
+
+
+## parameters
+
+ActivationType_filter = "ETD"
+SupplementalActivationCE_filter = 0
+
+df = main_df %>% filter(ActivationType == ActivationType_filter, SupplementalActivationCE == SupplementalActivationCE)#, ETDReactionTime==5)
+# df = main_df %>% filter(ActivationType == "ETD", ETDReactionTime == 15, EThcD==T,  !grepl("z16",filename), SupplementalActivationCE == 30) %>% filter(frag_dir != "I")  %>% filter(cosine_similarity > 0.95) 
+df = df %>% filter(cosine_similarity>0.5) #%>% filter(frag_dir != "I")
+
+
+
+frag_intens = summarize_frag_sites(df)
+
+p <- ggplot(frag_intens, aes(x = frag_site, y = total_intensity, fill = ion_type)) +
+      geom_bar(stat = "identity", position = "stack", width = 0.6) +
+      labs(x = "Fragment Site", y = "Total Intensity", fill = "Ion Type") +
+      scale_fill_manual(values = c("N" = "blue", "C" = "green", "I_N" = "red", "I_C" = "purple")) +
+      theme_minimal() 
+plot(p)
+
+
+```

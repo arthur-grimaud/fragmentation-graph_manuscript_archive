@@ -1,0 +1,252 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+library(viridis)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+
+```
+
+#### Load Data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+file_list <- c("data/PROTEASOME/a6/fragment_table_OFASD220624_05.mgf_controllerType=0 controllerNumber=1 scan=491_a6.csv")
+
+main_df <- file_list %>%
+  map_dfr(~ read_csv(.x) %>% 
+  mutate(filename = basename(.x))) %>%
+  select(-1) 
+
+```
+
+#### frag 
+
+```{r}
+
+
+file <- c("data/PROTEASOME/a6/fragment_table_OFASD220624_05.mgf_controllerType=0 controllerNumber=1 scan=718_a6.csv")
+
+file <- c("data/ETD20SA20/fragment_table_controllerType=0 controllerNumber=1 scan=11.csv")
+
+file <- c("data/FILGRASTIM_intern/fragment_table_2021_09_08_filgrastim_r_3.mzML_5.csv")
+
+file <- c("data/FILGRASTIM_term_2/fragment_table_2021_09_08_filgrastim_r_3.mzML_5.csv")
+
+main_df <- read_csv(file) %>% 
+  mutate(filename = basename(file)) %>%
+  select(-1)
+
+
+df = main_df %>% 
+  filter(intensity!=0)  %>%
+  filter(start_pos == 0) %>%
+  filter(grepl("t:c", frag_code)) #%>% filter(cosine_similarity>0.75)
+  
+  
+c_i_pos = ggplot(df, aes(x = end_pos, y = charge,  size = intensity, color= cosine_similarity)) +
+  geom_point() +
+  labs(
+    title = "Scatter Plot of Charge vs. End Position",
+    x = "End Position",
+    y = "Charge",
+    size = "Intensity"
+  )
+
+df = main_df %>% 
+  filter(intensity!=0)  %>%
+  filter(end_pos == max(main_df$end_pos)) %>%
+  filter(grepl("z\\+2", frag_code))
+  
+  
+c_i_pos = ggplot(df, aes(x = start_pos, y = charge, size = intensity, color= cosine_similarity)) +
+  geom_point() +
+  labs(
+    title = "Scatter Plot of Charge vs. End Position",
+    x = "start Position",
+    y = "Charge",
+    size = "Intensity"
+  )
+
+c_i_pos
+#intens_charge_pos_a6_c_ions
+```
+
+```{r}
+
+escape_special_characters <- function(str) {
+  special_chars <- c("\\", ".", "+", "*", "?", "|", "(", ")", "[", "]", "{", "}", "^", "$")
+  for (char in special_chars) {
+    str <- gsub(char, paste0("\\", char), str, fixed = TRUE)
+  }
+  return(str)
+}
+
+library(dplyr)
+library(ggplot2)
+
+# Define a function to compute fragment length and generate plots based on ion names
+generate_plot <- function(main_df, ion_name) {
+  df <- main_df %>%
+    filter(intensity != 0) %>%
+    filter(cosine_similarity != -1) %>%
+    filter(grepl(ion_name, frag_code))
+  
+  df <- df %>%
+    mutate(fragment_length = abs(end_pos - start_pos)) %>% # Compute fragment length
+    group_by(fragment_length, charge) %>%
+    summarise(intensity = sum(intensity), cosine_similarity = mean(cosine_similarity))
+
+  c_i_pos <- ggplot(df, aes(x = fragment_length, y = charge, size = log10(intensity), color = cosine_similarity)) +
+    geom_point() +
+    labs(
+      title = ion_name,
+      x = "Fragment Length",
+      y = "Charge",
+      size = "Intensity"
+    )+
+    scale_color_viridis()+
+    ylim(c(0,max(main_df$charge)))+
+    xlim(c(0,max(main_df$end_pos)))+
+    theme_bw()
+  return(c_i_pos)
+}
+
+# List of N-terminal and C-terminal ion names
+ion_names <- c("t:c@", "t:b\\@", "z\\+1:t\\@", "z\\+2:t\\@")
+
+# Read data from files
+
+#file <- c("data/PROTEASOME/a6/fragment_table_OFASD220624_05.mgf_controllerType=0 controllerNumber=1 scan=714_a6.csv")
+#file <- c("data/PROTEASOME/a9_plus_1-5_pos-100/fragment_table_OFASD220624_05_shift1-5_100end.mgf_controllerType=0 controllerNumber=1 scan=718_a6.csv")
+#file <- c("data/ETD20SA20/fragment_table_controllerType=0 controllerNumber=1 scan=11.csv")
+file <- c("data/FILGRASTIM_term_2/fragment_table_2021_09_08_filgrastim_r_3.mzML_5.csv")
+
+main_df <- read_csv(file) %>% 
+  mutate(filename = basename(file)) %>%
+  select(-1)
+
+df = main_df #%>% filter(frag_dir == "I") # %>% filter(cosine_similarity>0)
+
+ion_names <-unique(sapply(strsplit(df$frag_code, "@"),function(x) x[1]))
+ion_names <- sapply(ion_names, escape_special_characters)
+ion_names = paste0("^", ion_names)
+# Generate and save plots for each ion name
+for (ion_name in ion_names) {
+  
+  plot <- generate_plot(main_df, ion_name)
+  plot_filename <- paste0("plot_", basename(file) , "_" ,gsub("[[:punct:]]", "", ion_name), ".svg")
+  ggsave(plot_filename, plot, width = 20, height = 4)
+  print(plot_filename)
+}
+
+
+
+
+
+```
+
+
+
+```{r}
+
+folder_path <- "data/FILGRASTIM_term_2"
+file_list <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+
+main_df <- file_list %>%
+  map_dfr(~ read_csv(.x) %>% 
+  mutate(filename = basename(.x))) %>%
+  select(-1) 
+
+df = main_df  %>% filter(cosine_similarity>0.1)
+
+# Generate and save plots for each ion name
+for (ion_name in ion_names) {
+  
+  plot <- generate_plot(df, "@")
+  plot_filename <- paste0("plot_", basename(file) , "_all.svg")
+  ggsave(plot_filename, plot, width = 20, height = 4)
+  print(plot_filename)
+}
+
+
+```
+
+
+```{r}
+
+file <- c("data/ETD20SA20/fragment_table_controllerType=0 controllerNumber=1 scan=11.csv")
+
+file <- c("data/FILGRASTIM_intern/fragment_table_2021_09_08_filgrastim_r_3.mzML_5.csv")fragment_list_examples
+file <- c("data/fragment_list_examples/fragment_table_full_1.csv")
+
+
+
+main_df <- read_csv(file) 
+
+
+pept_len = max(main_df$end_pos)
+main_df = main_df%>% 
+  #filter(intensity!=0)  %>%
+  #filter(cosine_similarity !=1)%>%
+  filter(cosine_similarity >0.8)%>%
+  filter(start_pos == 1 | end_pos == pept_len)
+
+
+
+
+g = ggplot(main_df, aes(x = factor(charge), y = log10(intensity))) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.1,size=0.1, alpha = 0.25) +
+  labs(x = "charge state", y = "log(intensity)",
+       title = "Fragment charge vs intensity") +
+  theme_minimal()
+
+
+```

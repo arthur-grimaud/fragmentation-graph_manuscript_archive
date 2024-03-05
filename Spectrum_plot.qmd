@@ -1,0 +1,98 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+library(gridExtra)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+```
+
+#### Load Data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# Read the data from the text file
+data <- read.table("data/spectrum_undeconv.txt", header = FALSE, col.names = c("mz", "intensity"))
+
+
+# Sort the data by mz values
+data <- data[order(data$mz), ]
+
+# Create a plot with vertical lines
+plot(data$mz, rep(0, nrow(data)), type = "n", xlim = range(data$mz), ylim = range(data$intensity),
+     xlab = "m/z", ylab = "Intensity", main = "Raw spectrum (Centroided)")
+
+# Draw vertical lines for each pair
+segments(data$mz, rep(0, nrow(data)), data$mz, data$intensity)
+
+
+
+# Create a plot with vertical lines
+plot(data$mz, rep(0, nrow(data)), type = "n", xlim = c(660,670), ylim = range(data$intensity),
+     xlab = "m/z", ylab = "Intensity", main = "Undeconvoluted spectrum")
+
+# Draw vertical lines for each pair
+segments(data$mz, rep(0, nrow(data)), data$mz, data$intensity)
+```
+
+```{r}
+# Read the data from the text file
+data <- read.table("data/spectrum_deconv.txt", header = FALSE, col.names = c("mz", "intensity"))
+
+
+# Sort the data by mz values
+data <- data[order(data$mz), ]
+
+# Create a plot with vertical lines
+plot(data$mz, rep(0, nrow(data)), type = "n", xlim = range(data$mz), ylim = range(data$intensity),
+     xlab = "m/z", ylab = "Intensity", main = "Deconvoluted spectrum")
+
+# Draw vertical lines for each pair
+segments(data$mz, rep(0, nrow(data)), data$mz, data$intensity)
+
+
+```

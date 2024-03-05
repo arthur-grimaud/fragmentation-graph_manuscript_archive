@@ -1,0 +1,105 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+```
+
+#### Load Data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+# Read the tables
+deconvoluted <- read.csv("/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_intens/deconv/log.txt", sep="\t", header=F)
+
+centroided <- read.csv("/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_intens/no_deconv/log.txt", sep="\t",header = F)
+
+
+
+```
+
+merged_summarized = merged_df %\>% group_by(source,frag.type,file_number) %\>% summarize(percent = sum(V3)) %\>% ungroup()
+
+```{r}
+# Read the tables
+deconvoluted <- read.csv("/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_intens/deconv/log.txt", sep="\t", header=FALSE)
+centroided <- read.csv("/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_intens/no_deconv/log.txt", sep="\t", header=FALSE)
+
+# Assign a source column to each dataframe
+deconvoluted$source <- "deconvoluted"
+centroided$source <- "centroided"
+
+# Merge the dataframes using rbind
+merged_df <- rbind(deconvoluted, centroided)
+
+# Create a function to extract file number from the V5 column
+extract_file_number <- function(file_string) {
+  as.numeric(gsub("\\D*(\\d+).*", "\\1", file_string))
+}
+
+# Process the merged dataframe
+merged_df$frag.type <- ifelse(grepl("internal", merged_df$V1), "internal", "terminal")
+merged_df$sdi <- ifelse(grepl("_sdi", merged_df$V1), TRUE, FALSE)
+merged_df$file_number <- extract_file_number(merged_df$V5)
+
+# Display the processed merged dataframe
+head(merged_df)
+
+merged_summarized = merged_df %>% group_by(source,frag.type,file_number) %>% summarize(percent = sum(V3)) %>% ungroup() %>% filter(file_number > 23 & file_number < 40) %>% group_by(source,frag.type) %>% summarize(percent = mean(percent)) 
+
+
+ggplot(merged_summarized, aes(x = source, y = percent, fill = frag.type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Bar Plot of Fragment Types",
+       x = "Fragment Type",
+       y = "Percentage") +
+  
+  theme_minimal()
+
+```

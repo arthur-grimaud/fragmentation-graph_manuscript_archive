@@ -1,0 +1,117 @@
+---
+title: "Test ProteoformQuant "
+author: "Arthur Grimaud"
+output: "html_document"
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+This script gathers various analysis of internal fragment annotation with frag_graph
+
+#### Libraries (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# 
+# install.packages(c("plyr", "tidyr", "dplyr", "ggplot2", "tidyverse", "purrr", "data.table", "forcats", "stringr", "ggrepel", "gridExtra", "Metrics", "splitstackshape", "corrplot", "ggfortify", "FactoMineR", "pheatmap", "colorRamp2"))
+
+
+library(plyr,  include.only = 'rbind.fill')
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(purrr)
+require(data.table)
+library(forcats)
+library(stringr)
+library(tidyverse)
+library(data.table)
+library(ggrepel)
+library(gridExtra)
+library(Metrics)
+library(splitstackshape)
+library(corrplot)
+library(gridExtra)
+library(ggfortify)
+library(FactoMineR)
+library(pheatmap)
+library(colorRamp2)
+library(ComplexHeatmap)
+library(cowplot)
+library(stringdist)
+```
+
+#### Setup environment (hidden)
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+print("terminal sedtup")
+```
+
+#### Load Data
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+df_frag_its_dist = read.csv(file = "/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_intens/no_deconv/log.txt", sep="\t", header = F)
+colnames(df_frag_its_dist) = c("frag.type", "intensity", "percentage.intensity", "color","filename")
+
+# add frag param from filename
+df_frag_its_dist$Z <- as.integer(sub('.*Z(\\d+).*', '\\1', df_frag_its_dist$filename))
+df_frag_its_dist$ETD <- as.integer(sub('.*ETD(\\d+).*', '\\1', df_frag_its_dist$filename))
+df_frag_its_dist$SA <- as.integer(sub('.*SA(\\d+).*', '\\1', df_frag_its_dist$filename))
+
+
+```
+
+# MAIN
+
+```{r}
+# Load the necessary libraries
+library(dplyr)
+library(ggplot2)
+
+# Read the data
+df_frag_its_dist = read.csv(file = "/home/agrimaud/Desktop/Thesis/Projects/Fragmentation_graph/Fragmentation_graph_methods/output/h3_tail_intens/no_deconv/log.txt", sep="\t", header = F)
+colnames(df_frag_its_dist) = c("frag.type", "intensity", "percentage.intensity", "color","filename")
+
+# Add frag param from filename
+df_frag_its_dist$Z <- as.integer(sub('.*Z(\\d+).*', '\\1', df_frag_its_dist$filename))
+df_frag_its_dist$ETD <- as.integer(sub('.*ETD(\\d+).*', '\\1', df_frag_its_dist$filename))
+df_frag_its_dist$SA <- as.integer(sub('.*SA(\\d+).*', '\\1', df_frag_its_dist$filename))
+
+# Remove rows where intensity is zero and ETD is not NA
+df_frag_its_dist <- df_frag_its_dist %>% filter(intensity != 0, !is.na(ETD))
+
+# Summarize the percentage by mean, grouped by ETD and frag.type
+summary_data <- df_frag_its_dist %>%
+  group_by(ETD, frag.type) %>%
+  summarise(mean_percentage = mean(percentage.intensity))
+
+# Create a custom color palette
+custom_colors <- c("#eb8a3b", "#3279a8", "green", "purple", "orange")
+
+# Plot the percentage in a barplot with percentages within the bars
+plot = ggplot(summary_data, aes(x = factor(ETD), y = mean_percentage, fill = frag.type)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_text(aes(label = paste0(round(mean_percentage, 2), "%")), position = position_stack(vjust = 0.5)) +
+  scale_fill_manual(values = custom_colors) +
+  labs(x = "ETD Value", y = "Mean Percentage Intensity") +
+  ylim(0, 100) +
+  theme_minimal()
+
+show(plot)
+
+ggsave(plot, file="barplot_proportion_intern_term_h3_NO_DECONV.svg")
+
+
+
+```
+
+```{r}
+
+
+
+```
